@@ -20,3 +20,4 @@ index += a[N-1];
 - operator는 c++에서 예약된 이름이다. double& operator() (index) {return data[index];} 이런식으로 작성하면 객체의 연산자를 함수로 만든것이다. 여기서는 () 연산자를 조작한 것이다.
 - vector는 동적할당을 해주고, 데이터들이 메모리상에서 한줄로 위치한다. (속도 매우 빠름.), initialize_list는 데이터 수정이 불가한 대신에 함수 인자로 넘겨줄 때 자주 사용됨. vector는 자주 생성/소멸될 때 비효율적이지만, initialize_list는 그렇지 않음.
 - 예외처리에 대하여: 디버깅할 때만 하고, release했을 때는 안 하는 경우 존재.
+- reshape(): Tensor Class 의 shape과 strides 만 바꿔주면 됨.

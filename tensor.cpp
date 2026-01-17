@@ -42,6 +42,9 @@ class Tensor {
 
     void print() {
         for(int i = 0; i < total_size; i++) {
+            for(int j=0; j < strides.size()-1; j++) {
+                if (i != 0 && i % strides[j] == 0) cout << endl;
+            }
             cout << data[i] << " ";
         }
     }
@@ -95,15 +98,16 @@ class Tensor {
 };
 
 int main() {
-    Tensor tensor({512, 512, 3});
+    Tensor tensor({5, 5, 3});
     tensor.fill(5);
     // tensor.print();
 
     // cout << tensor({5, 1, 2}) << endl;
-    tensor({511, 511, 2}) = 1;
-    // tensor.print();
+    tensor({4, 4, 2}) = 1;
+    tensor.print();
 
-    tensor.reshape({512*512, 3});
+    tensor.reshape({5*5, 3});
+    // tensor.print();
 
     return 0;
 }
