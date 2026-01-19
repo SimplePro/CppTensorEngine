@@ -34,3 +34,4 @@ index += a[N-1];
 - 역전파 순서에서 가장 중요한 것은 부모 노드에 grad가 전달되기 전에 자식 노드의 grad가 완성되어야 한다는 점이다. 따라서 부모 노드가 꼭 자식 노드보다 나중에 grad를 전달받아야 한다. dfs 알고리즘을 이용해서 부모노드를 모두 방문한 노드를 리스트에 추가하면, 모든 자식 노드가 부모 노드보다 뒤에 오도록 정렬된다. 이 리스트를 거꾸로 뒤집으면 모든 부모 노드가 자식 노드보다 나중에 위치하는 정렬 순서를 얻게 된다.
 
 2. 역전파 기능 추가함.
+- backward() 안에서 build_topo() 의 첫번째 인자로 넣어줄 때, this는 Tensor* 타입인데 인자로 받는 타입은 shared_ptr<Tensor> 라서 고민이 되었는데, shared_from_this()라는 메소드가 있어서 enable_shared_from_this를 상속받아서 사용하면 해결된다. shared_from_this는 shared_ptr<Tensor>를 새로 만드는 대신에 이미 this를 가리키고 있는 shared_ptr<Tensor>를 찾아서 그걸 넣어주는 것이다. 근데, 테스트 도중에 bad_weak_ptr 에러를 마주쳤고, 해결 방법을 못 떠올려서 그냥 backward()를 전역함수로 빼주고 shared_ptr<Tensor>를 인자로 받는 함수로 바꾸어주었다. 공부를 더 해봐야겠다.

@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <memory>
+#include <set>
 
 using namespace std;
 
@@ -43,7 +44,7 @@ class Tensor {
         // data = new double[total_size];
         data = shared_ptr<double[]>(new double[total_size]);
 
-        if (require_grad) {
+        if (requires_grad) {
             grad = shared_ptr<double[]>(new double[total_size]);
             for(int i = 0; i < total_size; i++) {
                 grad[i] = 0.0;
@@ -117,118 +118,6 @@ class Tensor {
         }
     }
 
-    void is_same_size(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
-        if((lhs->shape).size() != (rhs->shape).size()) {
-            throw invalid_argument("Dimension mismatch!!");
-        }
-
-        for(int i=0; i<(lhs->shape).size(); i++) {
-            if ((lhs->shape)[i] != (rhs->shape)[i]) {
-                throw invalid_argument("size mismatch at dimension " + to_string(i));
-            }
-        }
-        
-    }
-
-    shared_ptr<Tensor> operator+(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
-
-        is_same_size(lhs, rhs);
-
-        auto res = make_shared<Tensor>(lhs->shape); // (*lhs).shape 과 동일
-        
-        for(int i=0; i<lhs->total_size; i++) {
-            (res->data)[i] = (lhs->data)[i] + (rhs->data)[i];
-        }
-
-        res->requires_grad = (lhs->requires_grad || rhs->requires_grad);
-
-        if(res->requires_grad) {
-            res->left_parent = lhs;
-            res->right_parent = rhs;
-    
-            res->op = "add";
-        }    
-
-        return res;
-
-    }
-
-    shared_ptr<Tensor> operator-(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
-        is_same_size(lhs, rhs);
-
-        auto res = make_shared<Tensor>(lhs->shape);
-
-        for(int i=0; i<(lhs->total_size); i++) {
-            (res->data)[i] = (lhs->data)[i] - (rhs->data)[i];
-        }
-
-        res->requires_grad = (lhs->requires_grad || rhs->requires_grad);
-
-        if(res->requires_grad) {
-            res->left_parent = lhs;
-            res->righ_parent = rhs;
-    
-            res->op = "subtraction";
-        }    
-
-        return res;
-    }
-
-    shared_ptr<Tensor> operator*(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
-
-        is_same_size(lhs, rhs);
-
-        auto res = make_shared<Tensor>(lhs->shape);
-
-        for(int i=0; i<lhs->total_size; i++) {
-            (res->data)[i] = (lhs->data)[i] * (rhs->data)[i];
-        }
-
-        res->requires_grad = (lhs->requires_grad || rhs->requires_grad); // 만약 부모중에 학습이 필요한 부모가 있다면 grad가 흘러야함.
-
-        if(res->requires_grad) {
-            res->left_parent = lhs;
-            res->right_parent = rhs;
-    
-            res->op = "multiplication";
-        }    
-
-        return res;
-    }
-
-    void backward() {
-
-        for(int i = 0; i < total_size; i++) {
-            grad[i] = 1.0;
-        }
-
-        vector<shared_ptr<Tensor>> topo_list;
-        set<shared_ptr<Tensor>> visited;
-
-        build_topo(this, topo_list, visited);
-
-        for(int i = topo_list.size()-1; i >= 0; i--) {
-            if(topo_list[i]->left_parent == nullptr || topo_list[i]->right_parent == nullptr) continue;
-            if(topo_list[i]->op == "add") {
-                for(int j = 0; j < topo_list[i]->total_size; j++) {
-                    (topo_list[i]->left_parent->grad)[j] += (topo_list[i]->grad)[j];
-                    (topo_list[i]->right_parent->grad)[j] += (topo_list[i]->grad)[j];
-                }
-            }
-            else if(topo_list[i]->op == "subtraction") {
-                for(int j = 0; j < topo_list[i]->total_size; j++) {
-                    (topo_list[i]->left_parent->grad)[j] += (topo_list[i]->grad)[j];
-                    (topo_list[i]->right_parent->grad)[j] -= (topo_list[i]->grad)[j];
-                }
-            }
-            else if(topo_list[i]->op == "multiplication") {
-                for(int j = 0; j < topo_list[i]->total_size; j++) {
-                    (topo_list[i]->left_parent->grad)[j] += (topo_list[i]->grad)[j] * (topo_list[i]->right_parent->data)[j];
-                    (topo_list[i]->right_parent->grad)[j] += (topo_list[i]->grad)[j] * (topo_list[i]->left_parent->data)[j];
-                }
-            }
-        }
-    }
 };
 
 void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set<shared_ptr<Tensor>>& visited) {
@@ -242,17 +131,153 @@ void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set
     topo_list.push_back(v);
 }
 
+void backward(shared_ptr<Tensor> t) {
+    
+    for(int i = 0; i < t->total_size; i++) {
+        t->grad[i] = 1.0;
+    }
+    
+    vector<shared_ptr<Tensor>> topo_list;
+    set<shared_ptr<Tensor>> visited;
+    
+    build_topo(t, topo_list, visited);
+    
+    for(int i = topo_list.size()-1; i >= 0; i--) {
+        if(topo_list[i]->left_parent == nullptr || topo_list[i]->right_parent == nullptr) continue;
+        if(topo_list[i]->op == "add") {
+            for(int j = 0; j < topo_list[i]->total_size; j++) {
+                (topo_list[i]->left_parent->grad)[j] += (topo_list[i]->grad)[j];
+                (topo_list[i]->right_parent->grad)[j] += (topo_list[i]->grad)[j];
+            }
+        }
+        else if(topo_list[i]->op == "subtraction") {
+            for(int j = 0; j < topo_list[i]->total_size; j++) {
+                (topo_list[i]->left_parent->grad)[j] += (topo_list[i]->grad)[j];
+                (topo_list[i]->right_parent->grad)[j] -= (topo_list[i]->grad)[j];
+            }
+        }
+        else if(topo_list[i]->op == "multiplication") {
+            for(int j = 0; j < topo_list[i]->total_size; j++) {
+                (topo_list[i]->left_parent->grad)[j] += (topo_list[i]->grad)[j] * (topo_list[i]->right_parent->data)[j];
+                (topo_list[i]->right_parent->grad)[j] += (topo_list[i]->grad)[j] * (topo_list[i]->left_parent->data)[j];
+            }
+        }
+    }
+}
+
+
+void is_same_size(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
+    if((lhs->shape).size() != (rhs->shape).size()) {
+        throw invalid_argument("Dimension mismatch!!");
+    }
+
+    for(int i=0; i<(lhs->shape).size(); i++) {
+        if ((lhs->shape)[i] != (rhs->shape)[i]) {
+            throw invalid_argument("size mismatch at dimension " + to_string(i));
+        }
+    }
+    
+}
+
+shared_ptr<Tensor> operator+(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
+    
+    is_same_size(lhs, rhs);
+
+    auto res = make_shared<Tensor>(lhs->shape); // (*lhs).shape 과 동일
+
+    for(int i=0; i<lhs->total_size; i++) {
+        (res->data)[i] = (lhs->data)[i] + (rhs->data)[i];
+    }
+
+    res->requires_grad = (lhs->requires_grad || rhs->requires_grad);
+
+    if(res->requires_grad) {
+        res->left_parent = lhs;
+        res->right_parent = rhs;
+
+        res->op = "add";
+    }    
+
+    return res;
+
+}
+
+shared_ptr<Tensor> operator-(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
+    is_same_size(lhs, rhs);
+
+    auto res = make_shared<Tensor>(lhs->shape);
+
+    for(int i=0; i<(lhs->total_size); i++) {
+        (res->data)[i] = (lhs->data)[i] - (rhs->data)[i];
+    }
+
+    res->requires_grad = (lhs->requires_grad || rhs->requires_grad);
+
+    if(res->requires_grad) {
+        res->left_parent = lhs;
+        res->right_parent = rhs;
+        
+        res->op = "subtraction";
+    }    
+    
+    return res;
+}
+
+shared_ptr<Tensor> operator*(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
+
+    is_same_size(lhs, rhs);
+
+    auto res = make_shared<Tensor>(lhs->shape);
+
+    for(int i=0; i<lhs->total_size; i++) {
+        (res->data)[i] = (lhs->data)[i] * (rhs->data)[i];
+    }
+
+    res->requires_grad = (lhs->requires_grad || rhs->requires_grad); // 만약 부모중에 학습이 필요한 부모가 있다면 grad가 흘러야함.
+
+    if(res->requires_grad) {
+        res->left_parent = lhs;
+        res->right_parent = rhs;
+
+        res->op = "multiplication";
+    }    
+
+    return res;
+}
+
+
 int main() {
-    Tensor tensor({5, 5, 3});
-    tensor.fill(5);
-    // tensor.print();
+    shared_ptr<Tensor> a = make_shared<Tensor>(vector<int>({3, 3}));
+    shared_ptr<Tensor> b = make_shared<Tensor>(vector<int>({3, 3}));
+    shared_ptr<Tensor> c = make_shared<Tensor>(vector<int>({3, 3}));
+    shared_ptr<Tensor> d = make_shared<Tensor>(vector<int>({3, 3}));
 
-    cout << tensor({4, 1, 2}) << endl;
-    tensor({4, 4, 2}) = 1;
-    // tensor.print();
+    a->fill(2);
+    b->fill(3);
+    c->fill(-2);
+    d->fill(-1);
 
-    tensor.reshape({5*5, 3});
-    // tensor.print();
+    a->print();
+    cout << endl << endl;
+    b->print();
+    cout << endl << endl;
+    c->print();
+    cout << endl << endl;
+    d->print();
+    cout << endl << endl;
+
+    shared_ptr<Tensor> e = a*b - c*d + a*b*c*d;
+
+    e->print();
+    cout << endl << e->op << endl;
+
+    backward(e);
+
+    cout << "a grad: " << a->grad[0] << endl;
+    cout << "b grad: " << b->grad[0] << endl;
+    cout << "c grad: " << c->grad[0] << endl;
+    cout << "d grad: " << d->grad[0] << endl;
+    cout << "e grad: " << e->grad[0] << endl;
 
     return 0;
 }
