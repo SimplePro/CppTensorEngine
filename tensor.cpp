@@ -3,6 +3,7 @@
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
+#include <memory>
 
 using namespace std;
 
@@ -12,7 +13,19 @@ class Tensor {
     vector<int> shape; // Tensor의 shape 저장
     vector<int> strides; // Tensor 를 flattening 해서 사용하는데, indexing 할때 필요한 변수
     int total_size = 1; // Tensor의 total_size
-    double* data; // Tensor의 값
+    shared_ptr<double[]> data; // Tensor의 값, Temporary Object 에 대한 해결방법으로 shared_ptr 활용
+    // shared_ptr 은 그 자체로 포인터 객체이다.
+    // shared_ptr<double> -> 문제점 1. data[i] 접근 안됨    2. ControlBlock이 delete[]가 아닌 delete를 하여 memory leaking!!
+    // shared_ptr<double*> -> 이중포인터
+    // shared_ptr<double[]> 를 통해 배열 전체를 관리해야함을 알려주고, data[i] 접근 가능
+
+    shared_ptr<Tensor> left_parent = nullptr;
+    shared_ptr<Tensor> right_parent = nullptr;
+
+    shared_ptr<double[]> grad = nullptr;
+    string op = "";
+    
+    bool requires_grad = true;
 
     Tensor (vector<int> s) : shape(s) {
         for(int dim : shape) {
@@ -27,12 +40,14 @@ class Tensor {
             strides[i] = strides[i+1]*shape[i+1];
         }
 
-        data = new double[total_size];
+        // data = new double[total_size];
+        data = shared_ptr<double[]>(new double[total_size]);
+        // data = make_shared<double[]>(total_size);
     }
 
-    ~Tensor() {
-        delete[] data;
-    }
+    // ~Tensor() {
+    //     delete[] data;
+    // }
 
     void fill(int value) {
         for(int i = 0; i < total_size; i++) {
@@ -95,6 +110,56 @@ class Tensor {
         }
     }
 
+    void is_same_size(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
+        if((lhs->shape).size() != (rhs->shape).size()) {
+            throw invalid_argument("Dimension mismatch!!");
+        }
+
+        for(int i=0; i<(lhs->shape).size(); i++) {
+            if ((lhs->shape)[i] != (rhs->shape)[i]) {
+                throw invalid_argument("size mismatch at dimension " + to_string(i));
+            }
+        }
+        
+    }
+
+    shared_ptr<Tensor> operator+(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
+
+        is_same_size(lhs, rhs);
+
+        auto res = make_shared<Tensor>(lhs->shape); // (*lhs).shape 과 동일
+        
+        for(int i=0; i<lhs->total_size; i++) {
+            (res->data)[i] = (lhs->data)[i] + (rhs->data)[i];
+        }
+
+        res->left_parent = lhs;
+        res->right_parent = rhs;
+
+        res->op = "add";
+
+        return res;
+
+    }
+
+    shared_ptr<Tensor> operator*(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
+
+        is_same_size(lhs, rhs);
+
+        auto res = make_shared<Tensor>(lhs->shape);
+
+        for(int i=0; i<lhs->total_size; i++) {
+            (res->data)[i] = (lhs->data)[i] * (rhs->data)[i];
+        }
+
+        res->left_parent = lhs;
+        res->right_parent = rhs;
+
+        res->op = "multiply";
+
+        return res;
+    }
+
 };
 
 int main() {
@@ -102,9 +167,9 @@ int main() {
     tensor.fill(5);
     // tensor.print();
 
-    // cout << tensor({5, 1, 2}) << endl;
+    cout << tensor({4, 1, 2}) << endl;
     tensor({4, 4, 2}) = 1;
-    tensor.print();
+    // tensor.print();
 
     tensor.reshape({5*5, 3});
     // tensor.print();
