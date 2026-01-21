@@ -26,8 +26,8 @@ index += a[N-1];
 1. 역전파에 대하여
 - autograd 방식을 위해 연산 graph를 만들어야 함. 각 tensor는 부모 tensor를 기록해둬야 함. 또한 Temporary Object 에 대하여는 연산 그래프를 어떻게 구현할지 고려해야함. -> 복합 연산에서는 temporary object가 발생하고 이를 그냥 관리하면 연산이 끝나고 temporary object 가 날아가버리기 때문에 나중에 역전파할 때 안됨.
 
-(1) Temporary Object에 대하여: shared_ptr 을 사용한다. shared_ptr은 변수 이름이 중요한 것이 아니라 본인을 어떤것이 참조하고 있다면 계속 메모리 공간에서 남아있는 타입이다. new가 하는 역할은 메모리를 요청하는 역할을 한다. 그리고 delete가 되기 전까지 메모리 공간을 아무도 못쓰게 한다. shared_ptr 역시 메모리를 요청한다는 점에서 new와 비슷하지만 Control Block이 참조횟수를 체크하며 참조횟수가 0보다 클때까지 메모리 공간을 차지하도록 한다. shared_ptr<double[]> 은 double type의 배열 전체를 가리키도록 명시한다. shared_ptr<double> 로 하게 되면 단일 원소만 가리키는 것으로 착각하여 내부적으로 소멸될 때 delete[]가 아닌 delete를 하며 memory leaking 위험이 높다. shared_ptr<T>에서 T는 스마트 포인터가 관리해야할 알맹이 데이터의 type을 가리킨다. shared_ptr<double*> 은 이중포인터가 되어서 위험하다. 이 또한 control block 이 delete[]가 아닌 delete를 하여 메모리 에러가 발생한다. shared_ptr 자체가 포인터를 뜻하고, <double[]> 은 control block이 관리해야할 데이터가 배열이라는 것을 알려주는 것이다. 또한 shared_ptr<double> 로 하면 data[i] 등의 접근을 막아두는데 shared_ptr<double[]> 로 하면 data[i] 접근 가능. shared_ptr로 생성하는 것과 make_ptr로 생성하는 것의 차이. shared_ptr<double[]>(new double[total_size]); 로 하면 new 부분에서 배열에 대한 할당 요청 한번과 shared_ptr 부분에서 제어 블록에 관한 할당 요청이 한 번, 총 두 번 할당 요청이 들어가게 되어 속도가 느리다. make_shared 로 하면 할당 요청을 한번에 하기 때문에 속도가 빠름.
-- d = a*b + c 이고, a, b, c의 참조횟수는 각각 1이라고 하면, a*b에서 a와 b가 operator* 의 인자로 넘어갈 때 참조횟수가 한번씩 증가해서 2가 되고, left_parent=lhs,right_parent=rhs 부분에서 참조횟수가 한번씩 증가해서 3이 되고, res는 make_shared를 해서 참조횟수가 1이었다가, res가 operator*에서 반환되면, 함수 scope에서 인자로 넘어올 때 참조횟수가 한번씩 증가했던게 사라지면서 a와 b의 참조횟수는 2가 되고, res였던 a*b는 참조회수가 여전히 1이었다가, a*b + c를 할 때 위의 과정을 또같이 거치면 a*b 객체는 참조횟수가 2, c도 참조횟수가 2가 되고, (a*b+c) 객체는 참조횟수가 1이었다가, d에 대입될 때 참조횟수가 1 증가해서 2가 되고, 그 다음줄로 넘어가면 temporary object 였던 a*b와 a*b+c가 사라져서 참조횟수가 1씩 감소한다. 즉, a, b, c의 참조횟수는 2, a*b와 a*b+c, d의 참조횟수는 1이 된다. shared_ptr의 참조횟수가 올라가는 유일한 방법은 shared_ptr 그 자체가 누군가에게 대입되거나 복사될 때이다. ex) shared_ptr<int> b = make_shared<int>(10); shared_ptr<int> c = make_shared<int>(20); int a = *b + *c; // 여전히 b와 c의 참조횟수는 1이다.
+(1) Temporary Object에 대하여: shared_ptr 을 사용한다. shared_ptr은 변수 이름이 중요한 것이 아니라 본인을 어떤것이 참조하고 있다면 계속 메모리 공간에서 남아있는 타입이다. new가 하는 역할은 메모리를 요청하는 역할을 한다. 그리고 delete가 되기 전까지 메모리 공간을 아무도 못쓰게 한다. shared_ptr 역시 메모리를 요청한다는 점에서 new와 비슷하지만 Control Block이 참조횟수를 체크하며 참조횟수가 0보다 클때까지 메모리 공간을 차지하도록 한다. shared_ptr<double[]> 은 double type의 배열 전체를 가리키도록 명시한다. `shared_ptr<double>` 로 하게 되면 단일 원소만 가리키는 것으로 착각하여 내부적으로 소멸될 때 delete[]가 아닌 delete를 하며 memory leaking 위험이 높다. `shared_ptr<T>`에서 T는 스마트 포인터가 관리해야할 알맹이 데이터의 type을 가리킨다. shared_ptr<double*> 은 이중포인터가 되어서 위험하다. 이 또한 control block 이 delete[]가 아닌 delete를 하여 메모리 에러가 발생한다. shared_ptr 자체가 포인터를 뜻하고, <double[]> 은 control block이 관리해야할 데이터가 배열이라는 것을 알려주는 것이다. 또한 `shared_ptr<double>` 로 하면 data[i] 등의 접근을 막아두는데 shared_ptr<double[]> 로 하면 data[i] 접근 가능. shared_ptr로 생성하는 것과 make_ptr로 생성하는 것의 차이. shared_ptr<double[]>(new double[total_size]); 로 하면 new 부분에서 배열에 대한 할당 요청 한번과 shared_ptr 부분에서 제어 블록에 관한 할당 요청이 한 번, 총 두 번 할당 요청이 들어가게 되어 속도가 느리다. make_shared 로 하면 할당 요청을 한번에 하기 때문에 속도가 빠름.
+- d = a*b + c 이고, a, b, c의 참조횟수는 각각 1이라고 하면, a*b에서 a와 b가 operator* 의 인자로 넘어갈 때 참조횟수가 한번씩 증가해서 2가 되고, left_parent=lhs,right_parent=rhs 부분에서 참조횟수가 한번씩 증가해서 3이 되고, res는 make_shared를 해서 참조횟수가 1이었다가, res가 operator*에서 반환되면, 함수 scope에서 인자로 넘어올 때 참조횟수가 한번씩 증가했던게 사라지면서 a와 b의 참조횟수는 2가 되고, res였던 a*b는 참조회수가 여전히 1이었다가, a*b + c를 할 때 위의 과정을 또같이 거치면 a*b 객체는 참조횟수가 2, c도 참조횟수가 2가 되고, (a*b+c) 객체는 참조횟수가 1이었다가, d에 대입될 때 참조횟수가 1 증가해서 2가 되고, 그 다음줄로 넘어가면 temporary object 였던 a*b와 a*b+c가 사라져서 참조횟수가 1씩 감소한다. 즉, a, b, c의 참조횟수는 2, a*b와 a*b+c, d의 참조횟수는 1이 된다. shared_ptr의 참조횟수가 올라가는 유일한 방법은 shared_ptr 그 자체가 누군가에게 대입되거나 복사될 때이다. ex) `shared_ptr<int>` b = `make_shared<int>`(10); `shared_ptr<int>` c = `make_shared<int>`(20); int a = *b + *c; // 여전히 b와 c의 참조횟수는 1이다.
 
 2026/01/19
 1. 역전파 순서에 대하여
@@ -35,3 +35,11 @@ index += a[N-1];
 
 2. 역전파 기능 추가함.
 - backward() 안에서 build_topo() 의 첫번째 인자로 넣어줄 때, this는 Tensor* 타입인데 인자로 받는 타입은 shared_ptr<Tensor> 라서 고민이 되었는데, shared_from_this()라는 메소드가 있어서 enable_shared_from_this를 상속받아서 사용하면 해결된다. shared_from_this는 shared_ptr<Tensor>를 새로 만드는 대신에 이미 this를 가리키고 있는 shared_ptr<Tensor>를 찾아서 그걸 넣어주는 것이다. 근데, 테스트 도중에 bad_weak_ptr 에러를 마주쳤고, 해결 방법을 못 떠올려서 그냥 backward()를 전역함수로 빼주고 shared_ptr<Tensor>를 인자로 받는 함수로 바꾸어주었다. 공부를 더 해봐야겠다.
+
+2026/01/20
+1. operation에 대한 다형성 확보
+- 연산이 매우 많기 때문에 다형성이 확보되어야 하고, 기존에 op를 String으로 관리하던 것을 객체형태로 관리하는 것으로 변경. 
+
+2026/01/21
+1. operation에 대한 다형성 확보
+- 코드 작성.
