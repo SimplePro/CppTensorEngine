@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <set>
+#include <algorithm>
 
 using namespace std;
 
@@ -42,13 +43,13 @@ class Tensor {
     // shared_ptr<Tensor> left_parent = nullptr;
     // shared_ptr<Tensor> right_parent = nullptr;
 
-    shared_ptr<double[]> grad = nullptr;
+    shared_ptr<double[]> grad = nullptr; // gradient 저장 변수
     // string op = "";
     shared_ptr<Function> grad_fn = nullptr;
     
     bool requires_grad = true;
 
-    Tensor (vector<int> s) : shape(s) {
+    Tensor (vector<int> s, bool requires_grad=true) : shape(s), requires_grad(requires_grad) {
         for(int dim : shape) {
             total_size *= dim;
         }
@@ -57,7 +58,7 @@ class Tensor {
 
         strides[shape.size()-1] = 1;
 
-        for(int i=shape.size()-2; i >= 0; i--) { 
+        for(int i=shape.size()-2; i >= 0; i--) {
             strides[i] = strides[i+1]*shape[i+1];
         }
 
@@ -106,7 +107,6 @@ class Tensor {
                 throw out_of_range("Index out of bounds at dimension " + to_string(i));
             }
             idx += *(index.begin() + i) * strides[i];
-
         }
 
         // cout << idx << endl;
@@ -140,8 +140,72 @@ class Tensor {
 
 };
 
+vector<vector<int>> get_broadcasting_index(const vector<int>& shape1, const vector<int>& strides1,
+                                            const vector<int>& shape2, const vector<int>& strides2) {
+    // int max_size = shape1.size() > shape2.size() ? shape1.size() : shape2.size();
+    int max_size = max(shape1.size(), shape2.size());
+    
+    vector<int> res_shape(max_size);
+    vector<int> res_strides(max_size);
+
+    vector<int> new_strides1(max_size);
+    vector<int> new_strides2(max_size);
+    
+    for(int i=0; i<max_size; i++) {
+        int idx1 = shape1.size() - 1 - i;
+        int idx2 = shape2.size() - 1 - i;
+        int res_idx = max_size - 1 - i;
+
+        int s1 = (idx1>=0) ? shape1[idx1] : 1;
+        int s2 = (idx2>=0) ? shape2[idx2] : 1;
+
+        int st1 = (idx1>=0) ? strides1[idx1] : 0;
+        int st2 = (idx2>=0) ? strides2[idx2] : 0;
+
+        if(s1 != s2 && s1 != 1 && s2 != 1) throw runtime_error("Error: Shapes are not broadcastable!");
+
+        res_shape[res_idx] = max(s1, s2);
+        
+        new_strides1[res_idx] = (s1==1) ? 0 : st1;
+        new_strides2[res_idx] = (s2==1) ? 0 : st2;
+    }
+
+    int res_total_size = 1;
+    for(int s : res_shape) res_total_size *= s;
+    
+    res_strides[max_size-1] = 1;
+    for(int i=max_size-2; i >= 0; i--) {
+            res_strides[i] = res_strides[i+1]*res_shape[i+1];
+    }
+
+    vector<int> index1(res_total_size), index2(res_total_size); // flattened
+
+    for(int i=0; i<res_total_size; i++) {
+        int i1=0, i2=0;
+        int remaining = i;
+
+        for(int j=0; j<max_size; j++) {
+            int multi_dim_index = remaining / res_strides[j];
+            remaining %= res_strides[j];
+
+            i1 += multi_dim_index * new_strides1[j];
+            i2 += multi_dim_index * new_strides2[j];
+        }
+
+        index1[i] = i1;
+        index2[i] = i2;
+    }
+
+    return {index1, index2, res_shape};
+
+}
+
 class Add : public Function {
     public:
+
+    vector<vector<int>> broadcasting_index;
+    int total_size;
+
     shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) override {
         auto lhs = inputs[0];
         auto rhs = inputs[1];
@@ -149,27 +213,41 @@ class Add : public Function {
         save_for_backward(lhs);
         save_for_backward(rhs);
 
-        auto res = make_shared<Tensor>(lhs->shape);
-        for(int i=0; i<lhs->total_size; i++) {
-            (res->data)[i] = (lhs->data)[i] + (rhs->data)[i];
+        broadcasting_index = get_broadcasting_index(lhs->shape, lhs->strides, rhs->shape, rhs->strides);
+
+        auto res = make_shared<Tensor>(broadcasting_index[2], lhs->requires_grad || rhs->requires_grad);
+        total_size = res->total_size;
+
+        for(int i=0; i<res->total_size; i++) {
+            (res->data)[i] = (lhs->data)[broadcasting_index[0][i]] + (rhs->data)[broadcasting_index[1][i]];
         }
+        // auto res = make_shared<Tensor>(lhs->shape, lhs->requires_grad || rhs->requires_grad);
+
+        // for(int i=0; i<lhs->total_size; i++) {
+        //     (res->data)[i] = (lhs->data)[i] + (rhs->data)[i];
+        // }
 
         return res;
     }
 
     void backward(shared_ptr<double[]> grad_output) override {
+
         auto lhs = saved_tensors[0];
         auto rhs = saved_tensors[1];
 
-        for(int i = 0; i < lhs->total_size; i++) {
-            (lhs->grad)[i] += grad_output[i];
-            (rhs->grad)[i] += grad_output[i];
+        for(int i = 0; i < total_size; i++) {
+            if(lhs->requires_grad) (lhs->grad)[broadcasting_index[0][i]] += grad_output[i];
+            if(rhs->requires_grad) (rhs->grad)[broadcasting_index[1][i]] += grad_output[i];
         }
     }
 };
 
 class Subtraction : public Function {
     public:
+
+    vector<vector<int>> broadcasting_index;
+    int total_size;
+
     shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) override {
         auto lhs = inputs[0];
         auto rhs = inputs[1];
@@ -177,9 +255,15 @@ class Subtraction : public Function {
         save_for_backward(lhs);
         save_for_backward(rhs);
 
-        auto res = make_shared<Tensor>(lhs->shape);
-        for(int i=0; i < lhs->total_size; i++) {
-            (res->data)[i] = (lhs->data)[i] - (rhs->data)[i];
+        broadcasting_index = get_broadcasting_index(lhs->shape, lhs->strides, rhs->shape, rhs->strides);
+
+        auto res = make_shared<Tensor>(broadcasting_index[2], lhs->requires_grad || rhs->requires_grad);
+        total_size = res->total_size;
+
+        // auto res = make_shared<Tensor>(lhs->shape, lhs->requires_grad || rhs->requires_grad);
+        for(int i=0; i < total_size; i++) {
+            (res->data)[i] = (lhs->data)[broadcasting_index[0][i]] - (rhs->data)[broadcasting_index[1][i]];
+            // (res->data)[i] = (lhs->data)[i] - (rhs->data)[i];
         }
 
         return res;
@@ -189,15 +273,19 @@ class Subtraction : public Function {
         auto lhs = saved_tensors[0];
         auto rhs = saved_tensors[1];
 
-        for(int i=0; i < lhs->total_size; i++) {
-            (lhs->grad)[i] += grad_output[i];
-            (rhs->grad)[i] -= grad_output[i];
+        for(int i=0; i < total_size; i++) {
+            if(lhs->requires_grad) (lhs->grad)[broadcasting_index[0][i]] += grad_output[i];
+            if(rhs->requires_grad) (rhs->grad)[broadcasting_index[1][i]] -= grad_output[i];
         }
     }
 };
 
 class Multiplication : public Function {
     public:
+
+    vector<vector<int>> broadcasting_index;
+    int total_size;
+
     shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) override {
         auto lhs = inputs[0];
         auto rhs = inputs[1];
@@ -205,9 +293,13 @@ class Multiplication : public Function {
         save_for_backward(lhs);
         save_for_backward(rhs);
 
-        auto res = make_shared<Tensor>(lhs->shape);
-        for(int i = 0; i < lhs->total_size; i++) {
-            (res->data)[i] = (lhs->data)[i] * (rhs->data)[i];
+        broadcasting_index = get_broadcasting_index(lhs->shape, lhs->strides, rhs->shape, rhs->strides);
+
+        auto res = make_shared<Tensor>(broadcasting_index[2], lhs->requires_grad || rhs->requires_grad);
+        total_size = res->total_size;
+
+        for(int i = 0; i < total_size; i++) {
+            (res->data)[i] = (lhs->data)[broadcasting_index[0][i]] * (rhs->data)[broadcasting_index[1][i]];
         }
 
         return res;
@@ -217,9 +309,9 @@ class Multiplication : public Function {
         auto lhs = saved_tensors[0];
         auto rhs = saved_tensors[1];
 
-        for(int i = 0; i < lhs->total_size; i++) {
-            (lhs->grad)[i] += (rhs->data)[i] * grad_output[i];
-            (rhs->grad)[i] += (lhs->data)[i] * grad_output[i];
+        for(int i = 0; i < total_size; i++) {
+            if(lhs->requires_grad) (lhs->grad)[broadcasting_index[0][i]] += (rhs->data)[broadcasting_index[1][i]] * grad_output[i];
+            if(rhs->requires_grad) (rhs->grad)[broadcasting_index[1][i]] += (lhs->data)[broadcasting_index[0][i]] * grad_output[i];
         }
     }
 };
@@ -230,8 +322,8 @@ void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set
     visited.insert(v);
 
     if(v->grad_fn) {
-        build_topo(v->grad_fn->saved_tensors[0], topo_list, visited);
-        build_topo(v->grad_fn->saved_tensors[1], topo_list, visited);
+        if(v->grad_fn->saved_tensors.size() > 0) build_topo(v->grad_fn->saved_tensors[0], topo_list, visited);
+        if(v->grad_fn->saved_tensors.size() > 1) build_topo(v->grad_fn->saved_tensors[1], topo_list, visited);
     }
 
     topo_list.push_back(v);
@@ -251,25 +343,6 @@ void backward(shared_ptr<Tensor> t) {
     for(int i = topo_list.size()-1; i >= 0; i--) {
         if(topo_list[i]->grad_fn == nullptr) continue;
         topo_list[i]->grad_fn->backward(topo_list[i]->grad);
-        // if(topo_list[i]->left_parent == nullptr || topo_list[i]->right_parent == nullptr) continue;
-        // if(topo_list[i]->op == "add") {
-        //     for(int j = 0; j < topo_list[i]->total_size; j++) {
-        //         (topo_list[i]->left_parent->grad)[j] += (topo_list[i]->grad)[j];
-        //         (topo_list[i]->right_parent->grad)[j] += (topo_list[i]->grad)[j];
-        //     }
-        // }
-        // else if(topo_list[i]->op == "subtraction") {
-        //     for(int j = 0; j < topo_list[i]->total_size; j++) {
-        //         (topo_list[i]->left_parent->grad)[j] += (topo_list[i]->grad)[j];
-        //         (topo_list[i]->right_parent->grad)[j] -= (topo_list[i]->grad)[j];
-        //     }
-        // }
-        // else if(topo_list[i]->op == "multiplication") {
-        //     for(int j = 0; j < topo_list[i]->total_size; j++) {
-        //         (topo_list[i]->left_parent->grad)[j] += (topo_list[i]->grad)[j] * (topo_list[i]->right_parent->data)[j];
-        //         (topo_list[i]->right_parent->grad)[j] += (topo_list[i]->grad)[j] * (topo_list[i]->left_parent->data)[j];
-        //     }
-        // }
     }
 }
 
@@ -284,24 +357,17 @@ void is_same_size(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
             throw invalid_argument("size mismatch at dimension " + to_string(i));
         }
     }
-    
 }
 
 shared_ptr<Tensor> operator+(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
     auto grad_fn = make_shared<Add>();
-    // auto res = make_shared<Tensor>(lhs->shape);
-    // res->grad_fn = make_shared<Add>();
     auto res = grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs});
     res->grad_fn = grad_fn;
-    // res->data = res->grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs})->data;
 
     return res;
 }
 
 shared_ptr<Tensor> operator-(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
-    // auto res = make_shared<Tensor>(lhs->shape);
-    // res->grad_fn = make_shared<Subtraction>();
-    // res->data = res->grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs})->data;
     auto grad_fn = make_shared<Subtraction>();
     auto res = grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs});
     res->grad_fn = grad_fn;
@@ -310,9 +376,6 @@ shared_ptr<Tensor> operator-(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
 }
 
 shared_ptr<Tensor> operator*(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
-    // auto res = make_shared<Tensor>(lhs->shape);
-    // res->grad_fn = make_shared<Multiplication>();
-    // res->data = res->grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs})->data;
     auto grad_fn = make_shared<Multiplication>();
     auto res = grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs});
     res->grad_fn = grad_fn;
@@ -320,78 +383,14 @@ shared_ptr<Tensor> operator*(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
     return res;
 }
 
-// shared_ptr<Tensor> operator+(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
-    
-//     is_same_size(lhs, rhs);
-
-//     auto res = make_shared<Tensor>(lhs->shape); // (*lhs).shape 과 동일
-
-//     for(int i=0; i<lhs->total_size; i++) {
-//         (res->data)[i] = (lhs->data)[i] + (rhs->data)[i];
-//     }
-
-//     res->requires_grad = (lhs->requires_grad || rhs->requires_grad);
-
-//     if(res->requires_grad) {
-//         res->left_parent = lhs;
-//         res->right_parent = rhs;
-
-//         res->op = "add";
-//     }    
-
-//     return res;
-
-// }
-
-// shared_ptr<Tensor> operator-(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
-//     is_same_size(lhs, rhs);
-
-//     auto res = make_shared<Tensor>(lhs->shape);
-
-//     for(int i=0; i<(lhs->total_size); i++) {
-//         (res->data)[i] = (lhs->data)[i] - (rhs->data)[i];
-//     }
-
-//     res->requires_grad = (lhs->requires_grad || rhs->requires_grad);
-
-//     if(res->requires_grad) {
-//         res->left_parent = lhs;
-//         res->right_parent = rhs;
-        
-//         res->op = "subtraction";
-//     }    
-    
-//     return res;
-// }
-
-// shared_ptr<Tensor> operator*(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
-
-//     is_same_size(lhs, rhs);
-
-//     auto res = make_shared<Tensor>(lhs->shape);
-
-//     for(int i=0; i<lhs->total_size; i++) {
-//         (res->data)[i] = (lhs->data)[i] * (rhs->data)[i];
-//     }
-
-//     res->requires_grad = (lhs->requires_grad || rhs->requires_grad); // 만약 부모중에 학습이 필요한 부모가 있다면 grad가 흘러야함.
-
-//     if(res->requires_grad) {
-//         res->left_parent = lhs;
-//         res->right_parent = rhs;
-
-//         res->op = "multiplication";
-//     }    
-
-//     return res;
-// }
-
 
 int main() {
+    // auto broadcasting_index = get_broadcasting_index(vector<int>{2, 3, 1, 2}, vector<int> {6, 2, 2, 1}, vector<int>{1, 4, 2}, vector<int>{8, 2, 1});
+
     shared_ptr<Tensor> a = make_shared<Tensor>(vector<int>({3, 3}));
-    shared_ptr<Tensor> b = make_shared<Tensor>(vector<int>({3, 3}));
+    shared_ptr<Tensor> b = make_shared<Tensor>(vector<int>({1, 3}));
     shared_ptr<Tensor> c = make_shared<Tensor>(vector<int>({3, 3}));
-    shared_ptr<Tensor> d = make_shared<Tensor>(vector<int>({3, 3}));
+    shared_ptr<Tensor> d = make_shared<Tensor>(vector<int>({3, 1}));
 
     a->fill(2);
     b->fill(3);
@@ -415,7 +414,7 @@ int main() {
 
     backward(e);
 
-    cout << "a grad: " << a->grad[2] << endl;
+    cout << "a grad: " << a->grad[0] << endl;
     cout << "b grad: " << b->grad[0] << endl;
     cout << "c grad: " << c->grad[0] << endl;
     cout << "d grad: " << d->grad[0] << endl;
