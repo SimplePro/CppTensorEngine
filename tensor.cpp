@@ -11,6 +11,7 @@ using namespace std;
 
 class Tensor;
 
+// Function 클래스 코드 이해 부족.
 class Function {
     public:
 
@@ -316,6 +317,20 @@ class Multiplication : public Function {
     }
 };
 
+class MatrixMultiplication : public Function {
+    public:
+
+    shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) override {
+        auto lhs = inputs[0];
+        auto rhs = inputs[1];
+
+        save_for_backwards(lhs);
+        save_for_backwards(rhs);
+
+        
+    }
+}
+
 void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set<shared_ptr<Tensor>>& visited) {
     if (v == nullptr || visited.count(v) > 0) return;
 
@@ -388,12 +403,14 @@ int main() {
     // auto broadcasting_index = get_broadcasting_index(vector<int>{2, 3, 1, 2}, vector<int> {6, 2, 2, 1}, vector<int>{1, 4, 2}, vector<int>{8, 2, 1});
 
     shared_ptr<Tensor> a = make_shared<Tensor>(vector<int>({3, 3}));
+    for(int i=0; i<9; i++) a->data[i] = i-4;
     shared_ptr<Tensor> b = make_shared<Tensor>(vector<int>({1, 3}));
     shared_ptr<Tensor> c = make_shared<Tensor>(vector<int>({3, 3}));
     shared_ptr<Tensor> d = make_shared<Tensor>(vector<int>({3, 1}));
 
-    a->fill(2);
+    // a->fill(2);
     b->fill(3);
+    b->data[2] = 2;
     c->fill(-2);
     d->fill(-1);
 
@@ -406,19 +423,21 @@ int main() {
     d->print();
     cout << endl << endl;
 
-    shared_ptr<Tensor> e = a*b - c*d + a*b*c*d;
+    shared_ptr<Tensor> e = a*b + a*b*c*d;
+    shared_ptr<Tensor> f = e*e + c*d;
 
-    e->print();
+    f->print();
     cout << endl;
     // cout << endl << e-> << endl;
 
-    backward(e);
+    backward(f);
 
     cout << "a grad: " << a->grad[0] << endl;
     cout << "b grad: " << b->grad[0] << endl;
     cout << "c grad: " << c->grad[0] << endl;
     cout << "d grad: " << d->grad[0] << endl;
     cout << "e grad: " << e->grad[0] << endl;
+    cout << "f grad: " << f->grad[0] << endl;
 
     return 0;
 }
