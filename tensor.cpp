@@ -20,14 +20,13 @@ class Function {
 
     virtual ~Function() = default;
 
-    virtual shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) = 0;
+    // virtual shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) = 0;
     virtual void backward(shared_ptr<double[]> grad_output) = 0;
 
     void save_for_backward(shared_ptr<Tensor> t) {
         saved_tensors.push_back(t);
     }
 };
-
 
 class Tensor {
     public:
@@ -94,26 +93,35 @@ class Tensor {
         }
     }
 
-    double& operator() (initializer_list<int> index) {
-
+    // index type: initializer_list<int> or vector<int>
+    template <typename T>
+    int get_flatten_idx(const T& index) {
         // 디버깅할 때만 사용
         if (index.size() != shape.size()) {
             throw out_of_range("Dimension mismatch!");
         }
 
         int idx = 0;
-        for (int i=0; i<shape.size(); i++) {
-            // 디버깅할 때만 사용
-            if (*(index.begin() + i) < 0 || *(index.begin() + i) >= shape[i]) {
+        int i = 0;
+        for (int s : index) {
+            if(s < 0 || s >= shape[i]) {
                 throw out_of_range("Index out of bounds at dimension " + to_string(i));
             }
-            idx += *(index.begin() + i) * strides[i];
+            idx += s * strides[i];
+            i += 1;
         }
 
-        // cout << idx << endl;
-
-        return data[idx];
+        return idx;
     }
+
+    double& operator() (initializer_list<int> index) {
+        return data[get_flatten_idx<initializer_list<int>>(index)];
+    }
+
+    double& get_gradient_element(initializer_list<int> index) {
+        return grad[get_flatten_idx<initializer_list<int>>(index)];
+    }
+
 
     void reshape(initializer_list<int> shape_) {
         int size = 1;
@@ -205,9 +213,8 @@ class Add : public Function {
     public:
 
     vector<vector<int>> broadcasting_index;
-    int total_size;
 
-    shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) override {
+    shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) {
         auto lhs = inputs[0];
         auto rhs = inputs[1];
 
@@ -217,7 +224,7 @@ class Add : public Function {
         broadcasting_index = get_broadcasting_index(lhs->shape, lhs->strides, rhs->shape, rhs->strides);
 
         auto res = make_shared<Tensor>(broadcasting_index[2], lhs->requires_grad || rhs->requires_grad);
-        total_size = res->total_size;
+        saved_attrs.push_back(res->total_size);
 
         for(int i=0; i<res->total_size; i++) {
             (res->data)[i] = (lhs->data)[broadcasting_index[0][i]] + (rhs->data)[broadcasting_index[1][i]];
@@ -236,7 +243,7 @@ class Add : public Function {
         auto lhs = saved_tensors[0];
         auto rhs = saved_tensors[1];
 
-        for(int i = 0; i < total_size; i++) {
+        for(int i = 0; i < saved_attrs[0]; i++) {
             if(lhs->requires_grad) (lhs->grad)[broadcasting_index[0][i]] += grad_output[i];
             if(rhs->requires_grad) (rhs->grad)[broadcasting_index[1][i]] += grad_output[i];
         }
@@ -247,9 +254,8 @@ class Subtraction : public Function {
     public:
 
     vector<vector<int>> broadcasting_index;
-    int total_size;
 
-    shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) override {
+    shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) {
         auto lhs = inputs[0];
         auto rhs = inputs[1];
 
@@ -259,10 +265,10 @@ class Subtraction : public Function {
         broadcasting_index = get_broadcasting_index(lhs->shape, lhs->strides, rhs->shape, rhs->strides);
 
         auto res = make_shared<Tensor>(broadcasting_index[2], lhs->requires_grad || rhs->requires_grad);
-        total_size = res->total_size;
+        saved_attrs.push_back(res->total_size);
 
         // auto res = make_shared<Tensor>(lhs->shape, lhs->requires_grad || rhs->requires_grad);
-        for(int i=0; i < total_size; i++) {
+        for(int i=0; i < saved_attrs[0]; i++) {
             (res->data)[i] = (lhs->data)[broadcasting_index[0][i]] - (rhs->data)[broadcasting_index[1][i]];
             // (res->data)[i] = (lhs->data)[i] - (rhs->data)[i];
         }
@@ -274,7 +280,7 @@ class Subtraction : public Function {
         auto lhs = saved_tensors[0];
         auto rhs = saved_tensors[1];
 
-        for(int i=0; i < total_size; i++) {
+        for(int i=0; i < saved_attrs[0]; i++) {
             if(lhs->requires_grad) (lhs->grad)[broadcasting_index[0][i]] += grad_output[i];
             if(rhs->requires_grad) (rhs->grad)[broadcasting_index[1][i]] -= grad_output[i];
         }
@@ -285,9 +291,8 @@ class Multiplication : public Function {
     public:
 
     vector<vector<int>> broadcasting_index;
-    int total_size;
 
-    shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) override {
+    shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) {
         auto lhs = inputs[0];
         auto rhs = inputs[1];
 
@@ -297,9 +302,9 @@ class Multiplication : public Function {
         broadcasting_index = get_broadcasting_index(lhs->shape, lhs->strides, rhs->shape, rhs->strides);
 
         auto res = make_shared<Tensor>(broadcasting_index[2], lhs->requires_grad || rhs->requires_grad);
-        total_size = res->total_size;
+        saved_attrs.push_back(res->total_size);
 
-        for(int i = 0; i < total_size; i++) {
+        for(int i = 0; i < saved_attrs[0]; i++) {
             (res->data)[i] = (lhs->data)[broadcasting_index[0][i]] * (rhs->data)[broadcasting_index[1][i]];
         }
 
@@ -310,25 +315,129 @@ class Multiplication : public Function {
         auto lhs = saved_tensors[0];
         auto rhs = saved_tensors[1];
 
-        for(int i = 0; i < total_size; i++) {
+        for(int i = 0; i < saved_attrs[0]; i++) {
             if(lhs->requires_grad) (lhs->grad)[broadcasting_index[0][i]] += (rhs->data)[broadcasting_index[1][i]] * grad_output[i];
             if(rhs->requires_grad) (rhs->grad)[broadcasting_index[1][i]] += (lhs->data)[broadcasting_index[0][i]] * grad_output[i];
         }
     }
 };
 
+// Currently supports 2d only. To be updated later.
+class Transpose : public Function {
+    public:
+
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+        auto result = make_shared<Tensor>(vector<int>{input->shape[1], input->shape[0]}, input->requires_grad);
+
+        for(int i=0; i<input->shape[0]; i++) {
+            for(int j=0; j<input->shape[1]; j++) {
+                result->data[result->get_flatten_idx<initializer_list<int>>({j, i})] = input->data[input->get_flatten_idx<initializer_list<int>>({i, j})];
+            }
+        }
+
+        save_for_backward(input);
+
+        return result;
+    }
+
+    void backward(shared_ptr<double[]> grad_output) override {
+        auto parent = saved_tensors[0];
+        int s1 = parent->shape[0];
+        int s2 = parent->shape[1];
+
+        for(int k=0; k<s1*s2; k++) {
+            int res_row_idx = k / s1; // res 의 행index
+            int res_col_idx = k % s1; // res 의 열index
+
+            parent->get_gradient_element({res_col_idx, res_row_idx}) += grad_output[k];
+        }
+    }
+};
+
+shared_ptr<Tensor> transpose_(shared_ptr<Tensor> input) {
+    auto transpose_fn = make_shared<Transpose>();
+    auto res = transpose_fn->forward(input);
+    res->grad_fn = transpose_fn;
+
+    return res;
+}
+
 class MatrixMultiplication : public Function {
     public:
 
-    shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) override {
+    vector<int> res_strides;
+
+    shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) {
         auto lhs = inputs[0];
-        auto rhs = inputs[1];
+        // auto rhs = inputs[1];
+        auto rhs_T = transpose_(inputs[1]);
 
-        save_for_backwards(lhs);
-        save_for_backwards(rhs);
+        // for(int i=0; i<4; i++) cout << rhs_T->data[i] << " ";
+        // cout << endl;
 
-        
+        save_for_backward(lhs);
+        save_for_backward(rhs_T);
+
+        vector<int> res_shape = lhs->shape;
+        res_shape[res_shape.size()-1] = rhs_T->shape[0];
+        auto res = make_shared<Tensor>(res_shape, lhs->requires_grad||rhs_T->requires_grad);
+        saved_attrs.push_back(res->total_size);
+        res_strides = res->strides;
+
+        for(int i=0; i<res->total_size; i++) {
+            // vector<int> index;
+            int remaining = i;
+            int lhs_idx = 0;
+            int rhs_T_idx = 0;
+            
+            for(int j=0; j<res->shape.size()-1; j++) {
+                lhs_idx += remaining/res->strides[j] * lhs->strides[j];
+                // index.push_back(remaining/strides[j]);
+                remaining %= res->strides[j];
+            }
+            rhs_T_idx = remaining;
+
+            // cout << "i: " << i << endl;
+            // cout << "lhs_idx: " << lhs_idx << endl;
+            // cout << "rhs_T_idx: " << rhs_T_idx << endl << endl;
+            
+
+            for(int k=0; k<lhs->shape[lhs->shape.size()-1]; k++) {
+                res->data[i] += lhs->data[lhs_idx+k] * rhs_T->data[rhs_T_idx*rhs_T->strides[0]+k];
+            }
+        }
+
+        return res;
     }
+
+    void backward(shared_ptr<double[]> grad_output) override {
+        auto lhs = saved_tensors[0];
+        auto rhs_T = saved_tensors[1];
+
+        for(int i=0; i<saved_attrs[0]; i++) {
+            int remaining = i;
+            int lhs_idx = 0;
+            int rhs_T_idx = 0;
+
+            for(int j=0; j<lhs->shape.size()-1; j++) {
+                lhs_idx += remaining/res_strides[j] * lhs->strides[j];
+                remaining %= res_strides[j];
+            }
+            rhs_T_idx = remaining;
+
+            for(int k=0; k<lhs->shape[lhs->shape.size()-1]; k++) {
+                lhs->grad[lhs_idx+k] += rhs_T->data[rhs_T_idx*rhs_T->strides[0]+k] * grad_output[i];
+                rhs_T->grad[rhs_T_idx*rhs_T->strides[0]+k] += lhs->data[lhs_idx+k] * grad_output[i];
+            }
+        }
+    }
+};
+
+shared_ptr<Tensor> matmul(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
+    auto grad_fn = make_shared<MatrixMultiplication>();
+    auto res = grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs});
+    res->grad_fn = grad_fn;
+    return res;
 }
 
 void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set<shared_ptr<Tensor>>& visited) {
@@ -357,6 +466,7 @@ void backward(shared_ptr<Tensor> t) {
     
     for(int i = topo_list.size()-1; i >= 0; i--) {
         if(topo_list[i]->grad_fn == nullptr) continue;
+        cout << topo_list[i]->grad_fn->saved_tensors.size() << endl;
         topo_list[i]->grad_fn->backward(topo_list[i]->grad);
     }
 }
@@ -402,42 +512,66 @@ shared_ptr<Tensor> operator*(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
 int main() {
     // auto broadcasting_index = get_broadcasting_index(vector<int>{2, 3, 1, 2}, vector<int> {6, 2, 2, 1}, vector<int>{1, 4, 2}, vector<int>{8, 2, 1});
 
-    shared_ptr<Tensor> a = make_shared<Tensor>(vector<int>({3, 3}));
-    for(int i=0; i<9; i++) a->data[i] = i-4;
-    shared_ptr<Tensor> b = make_shared<Tensor>(vector<int>({1, 3}));
-    shared_ptr<Tensor> c = make_shared<Tensor>(vector<int>({3, 3}));
-    shared_ptr<Tensor> d = make_shared<Tensor>(vector<int>({3, 1}));
+    shared_ptr<Tensor> a = make_shared<Tensor>(vector<int>{3, 3, 2});
+    for(int i=0; i<18; i++) {
+        a->data[i] = i+1;
+    }
+    shared_ptr<Tensor> b = make_shared<Tensor>(vector<int>{2, 4});
+    for(int i=0; i<8; i++) {
+        b->data[i] = i-4;
+    }
+
+    shared_ptr<Tensor> c = matmul(a, b);
+    cout << "C: ";
+    for(int i=0; i<36; i++) {
+        cout << c->data[i] << " ";
+    }
+
+    cout << endl;
+    backward(c);
+
+    cout << "\nA grad: ";
+    for(int i=0; i<18; i++) {
+        cout << a->grad[i] << " ";
+    }
+
+    cout << "\nB grad: ";
+    for(int i=0; i<8; i++) {
+        cout << b->grad[i] << " ";
+    }
+
+    cout << endl;
 
     // a->fill(2);
-    b->fill(3);
-    b->data[2] = 2;
-    c->fill(-2);
-    d->fill(-1);
+    // b->fill(3);
+    // b->data[2] = 2;
+    // c->fill(-2);
+    // d->fill(-1);
 
-    a->print();
-    cout << endl << endl;
-    b->print();
-    cout << endl << endl;
-    c->print();
-    cout << endl << endl;
-    d->print();
-    cout << endl << endl;
+    // a->print();
+    // cout << endl << endl;
+    // b->print();
+    // cout << endl << endl;
+    // c->print();
+    // cout << endl << endl;
+    // d->print();
+    // cout << endl << endl;
 
-    shared_ptr<Tensor> e = a*b + a*b*c*d;
-    shared_ptr<Tensor> f = e*e + c*d;
+    // shared_ptr<Tensor> e = a*b + a*b*c*d;
+    // shared_ptr<Tensor> f = e*e + c*d;
 
-    f->print();
-    cout << endl;
-    // cout << endl << e-> << endl;
+    // f->print();
+    // cout << endl;
+    // // cout << endl << e-> << endl;
 
-    backward(f);
+    // backward(f);
 
-    cout << "a grad: " << a->grad[0] << endl;
-    cout << "b grad: " << b->grad[0] << endl;
-    cout << "c grad: " << c->grad[0] << endl;
-    cout << "d grad: " << d->grad[0] << endl;
-    cout << "e grad: " << e->grad[0] << endl;
-    cout << "f grad: " << f->grad[0] << endl;
+    // cout << "a grad: " << a->grad[0] << endl;
+    // cout << "b grad: " << b->grad[0] << endl;
+    // cout << "c grad: " << c->grad[0] << endl;
+    // cout << "d grad: " << d->grad[0] << endl;
+    // cout << "e grad: " << e->grad[0] << endl;
+    // cout << "f grad: " << f->grad[0] << endl;
 
     return 0;
 }
