@@ -469,6 +469,13 @@ void backward(shared_ptr<Tensor> t) {
         cout << topo_list[i]->grad_fn->saved_tensors.size() << endl;
         topo_list[i]->grad_fn->backward(topo_list[i]->grad);
     }
+
+    for (auto& t: topo_list) {
+        if(t->grad_fn) {
+            t->grad_fn->saved_tensors.clear();
+        }
+    }
+
 }
 
 
