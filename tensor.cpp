@@ -466,7 +466,7 @@ void backward(shared_ptr<Tensor> t) {
     
     for(int i = topo_list.size()-1; i >= 0; i--) {
         if(topo_list[i]->grad_fn == nullptr) continue;
-        cout << topo_list[i]->grad_fn->saved_tensors.size() << endl;
+        // cout << topo_list[i]->grad_fn->saved_tensors.size() << endl;
         topo_list[i]->grad_fn->backward(topo_list[i]->grad);
     }
 
@@ -535,7 +535,14 @@ int main() {
     }
 
     cout << endl;
+    cout << "A use count: " << a.use_count() << endl;
+    cout << "B use count: " << b.use_count() << endl;
+    cout << "C use count: " << c.use_count();
     backward(c);
+    cout << endl;
+    cout << "after A use count: " << a.use_count() << endl;
+    cout << "after B use count: " << b.use_count() << endl;
+    cout << "after C use count: " << c.use_count();
 
     cout << "\nA grad: ";
     for(int i=0; i<18; i++) {
