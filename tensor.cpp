@@ -6,6 +6,7 @@
 #include <memory>
 #include <set>
 #include <algorithm>
+#include <cmath>
 
 using namespace std;
 
@@ -322,6 +323,38 @@ class Multiplication : public Function {
     }
 };
 
+class ReciprocalFunction : public Function {
+    public:
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+        auto res = make_shared<Tensor>(input->shape, input->requires_grad);
+        
+        for(int i=0; i<res->total_size; i++) {
+            res->data[i] = 1 / input->data[i];
+        }
+        save_for_backward(input);
+
+        return res;
+    }
+
+    void backward(shared_ptr<double[]> grad_output) override {
+        auto input = saved_tensors[0];
+
+        if(input->requires_grad) {
+            for(int i=0; i<input->total_size; i++) {
+                input->grad[i] -= pow((1/input->data[i]), 2) * grad_output[i];
+            } 
+        }
+    }
+};
+
+shared_ptr<Tensor> reciprocal(shared_ptr<Tensor> input) {
+    auto grad_fn = shared_ptr<ReciprocalFunction>();
+    auto res = grad_fn->forward(input);
+    res->grad_fn = grad_fn;
+
+    return res;
+}
+
 // Currently supports 2d only. To be updated later.
 class Transpose : public Function {
     public:
@@ -426,8 +459,8 @@ class MatrixMultiplication : public Function {
             rhs_T_idx = remaining;
 
             for(int k=0; k<lhs->shape[lhs->shape.size()-1]; k++) {
-                lhs->grad[lhs_idx+k] += rhs_T->data[rhs_T_idx*rhs_T->strides[0]+k] * grad_output[i];
-                rhs_T->grad[rhs_T_idx*rhs_T->strides[0]+k] += lhs->data[lhs_idx+k] * grad_output[i];
+                if(lhs->requires_grad) lhs->grad[lhs_idx+k] += rhs_T->data[rhs_T_idx*rhs_T->strides[0]+k] * grad_output[i];
+                if(rhs_T->requires_grad) rhs_T->grad[rhs_T_idx*rhs_T->strides[0]+k] += lhs->data[lhs_idx+k] * grad_output[i];
             }
         }
     }
@@ -438,6 +471,88 @@ shared_ptr<Tensor> matmul(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
     auto res = grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs});
     res->grad_fn = grad_fn;
     return res;
+}
+
+class ExponentialFunction : public Function {
+    public:
+
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+        auto result = make_shared<Tensor>(input->shape, input->requires_grad);
+        save_for_backward(input);
+        saved_attrs.push_back(input->total_size);
+
+        for(int i=0; i<saved_attrs[0]; i++) {
+            result->data[i] = exp(input->data[i]);
+        }
+
+        return result;
+    }
+
+    void backward(shared_ptr<double[]> grad_output) override {
+        auto input = saved_tensors[0];
+        if (input->requires_grad){
+            for(int i=0; i<saved_attrs[0]; i++) {
+                input->grad[i] += exp(input->data[i]);
+            }
+        }
+
+    }
+};
+
+shared_ptr<Tensor> exp(shared_ptr<Tensor> input) {
+    auto grad_fn = make_shared<ExponentialFunction>();
+    auto result = grad_fn->forward(input);
+    result->grad_fn = grad_fn;
+
+    return result;
+}
+
+class LeakyReLUFunction : public Function {
+    public:
+
+    double slope;
+
+    LeakyReLUFunction(double slope=0.2) : slope(slope) {}
+
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+        auto res = make_shared<Tensor>(input->shape, input->requires_grad);
+        save_for_backward(input);
+
+        for (int i=0; i<res->total_size; i++) {
+            if(input->data[i] >= 0) {
+                res->data[i] = input->data[i];
+            } else {
+                res->data[i] = slope * input->data[i];
+            }
+        }
+    }
+
+    void backward(shared_ptr<double[]> grad_output) override {
+        auto input = saved_tensors[0];
+
+        for(int i=0; i<input->total_size; i++) {
+            if(input->data[i] >= 0) {
+                input->grad[i] += grad_output[i];
+            } else {
+                input->grad[i] += slope * grad_output[i];
+            }
+        }
+    }
+};
+
+shared_ptr<Tensor> leaky_relu(double slope, shared_ptr<Tensor> input) {
+    auto grad_fn = make_shared<LeakyReLUFunction>(slope);
+    auto res = grad_fn->forward(input);
+    res->grad_fn = grad_fn;
+
+    return res;
+}
+
+shared_ptr<Tensor> create_constant(double value) {
+    auto c = make_shared<Tensor>(vector<int>{1}, false);
+    c->data[0] = value;
+
+    return c;
 }
 
 void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set<shared_ptr<Tensor>>& visited) {
@@ -475,7 +590,7 @@ void backward(shared_ptr<Tensor> t) {
             t->grad_fn->saved_tensors.clear();
         }
     }
-
+    
 }
 
 
@@ -495,7 +610,7 @@ shared_ptr<Tensor> operator+(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
     auto grad_fn = make_shared<Add>();
     auto res = grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs});
     res->grad_fn = grad_fn;
-
+    
     return res;
 }
 
@@ -511,9 +626,88 @@ shared_ptr<Tensor> operator*(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
     auto grad_fn = make_shared<Multiplication>();
     auto res = grad_fn->forward(vector<shared_ptr<Tensor>>{lhs, rhs});
     res->grad_fn = grad_fn;
-
+    
     return res;
 }
+
+shared_ptr<Tensor> C1 = create_constant(1);
+shared_ptr<Tensor> C2 = create_constant(-1);
+
+shared_ptr<Tensor> sigmoid(shared_ptr<Tensor> input) {
+    return reciprocal(C1 + exp(C2 * input));
+}
+
+class Layer {
+    protected:
+    bool requires_grad = true;
+    
+    public:
+    vector<shared_ptr<Tensor>> parameters;
+    virtual ~Layer() = default;
+};
+
+class FCLayer : public Layer {
+    public:
+
+    int in_features, out_features;
+    bool bias = true;
+
+    FCLayer(int in_features, int out_features, bool bias=true, bool requires_grad_=true) : in_features(in_features), out_features(out_features), bias(bias) {
+        requires_grad = requires_grad_; 
+        shared_ptr<Tensor> weight = make_shared<Tensor>(vector<int>{in_features, out_features}, requires_grad);
+        parameters.push_back(weight);
+
+        if (bias) {
+            shared_ptr<Tensor> b = make_shared<Tensor>(vector<int>{out_features}, requires_grad);
+            parameters.push_back(b);
+        }
+    }
+
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+        shared_ptr<Tensor> res = matmul(input, parameters[0]);
+        if (bias) res = res + parameters[1];
+
+        return res;
+    }
+};
+
+class LeakyReLULayer : public Layer {
+    public:
+
+    double slope;
+
+    LeakyReLULayer(double slope=0.2) : slope(slope) {}
+
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+        return leaky_relu(slope, input);
+    }
+};
+
+
+class Sequential {
+    public:
+
+};
+
+class Optimization {
+    public:
+
+    shared_ptr<Sequential> sequential;
+    float lr;
+
+    Optimization(shared_ptr<Sequential> seq, float lr=0.001) : lr(lr) {
+        sequential = seq;
+    }
+
+    void step() {
+
+    }
+
+    void zero_grad() {
+
+    }
+
+};
 
 
 int main() {
@@ -527,13 +721,13 @@ int main() {
     for(int i=0; i<8; i++) {
         b->data[i] = i-4;
     }
-
+    
     shared_ptr<Tensor> c = matmul(a, b);
     cout << "C: ";
     for(int i=0; i<36; i++) {
         cout << c->data[i] << " ";
     }
-
+    
     cout << endl;
     cout << "A use count: " << a.use_count() << endl;
     cout << "B use count: " << b.use_count() << endl;

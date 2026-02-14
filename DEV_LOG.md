@@ -71,5 +71,8 @@ index += a[N-1];
 - Transpose를 먼저 구현해야 함. 구현은 크게 어렵지 않고, backward 부분만 실수하지 않도록 조심해서 구현해주면 된다.
 - Matrix Multiplication의 A@B에서 B는 transpose를 취하여 연산한다. 행렬미분에 대한 지식이 충분하지는 않지만, 결국 행렬연산을 분해해보면 성분별 곱과 합으로 이루어져 있기 때문에 구현은 할 수 있다. (이후 행렬미분에 대한 공부는 필요)
 
-2026/02/11
-- 
+2026/02/14
+- exp, reciprocal, sigmoid, leakyrelu를 추가하였다. sigmoid는 따로 클래스를 정의할 필요 없이 이미 정의된 모듈들을 통해서 함수 하나만으로 표현이 가능했다.
+- 전역 scope에서는 변수의 선언과 초기화만 허용된다.
+- Layer class 를 추가하여, 이 class를 상속받는 여러 Layer Class를 만들어야 함. 이 Layer들은 각각의 parameters 멤버변수를 갖고 있고 나중에 optimization은 이 parameters에 접근해서 update를 하는 것이다.
+- Layer들을 그룹으로 관리할 수 있도록 Sequential class 를 만들어야 한다.
