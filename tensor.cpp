@@ -325,13 +325,16 @@ class Multiplication : public Function {
 
 class ReciprocalFunction : public Function {
     public:
+
     shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
         auto res = make_shared<Tensor>(input->shape, input->requires_grad);
         
         for(int i=0; i<res->total_size; i++) {
+            // cout << i << " " << input->data[i] << endl;
             res->data[i] = 1 / input->data[i];
         }
         save_for_backward(input);
+        // saved_tensors.push_back(input);
 
         return res;
     }
@@ -348,7 +351,8 @@ class ReciprocalFunction : public Function {
 };
 
 shared_ptr<Tensor> reciprocal(shared_ptr<Tensor> input) {
-    auto grad_fn = shared_ptr<ReciprocalFunction>();
+    // auto grad_fn = shared_ptr<ReciprocalFunction>(); // 이렇게 하면 ve_for_backward 부분에서 segmentation fault가 뜸.
+    auto grad_fn = make_shared<ReciprocalFunction>(); // 이렇게 해야 ReciprocalFunction 객체가 생성되고, 그 객체를 가리키는 pointer 객체가 만들어짐.
     auto res = grad_fn->forward(input);
     res->grad_fn = grad_fn;
 
@@ -375,14 +379,16 @@ class Transpose : public Function {
 
     void backward(shared_ptr<double[]> grad_output) override {
         auto parent = saved_tensors[0];
-        int s1 = parent->shape[0];
-        int s2 = parent->shape[1];
-
-        for(int k=0; k<s1*s2; k++) {
-            int res_row_idx = k / s1; // res 의 행index
-            int res_col_idx = k % s1; // res 의 열index
-
-            parent->get_gradient_element({res_col_idx, res_row_idx}) += grad_output[k];
+        if(parent->requires_grad){
+            int s1 = parent->shape[0];
+            int s2 = parent->shape[1];
+    
+            for(int k=0; k<s1*s2; k++) {
+                int res_row_idx = k / s1; // res 의 행index
+                int res_col_idx = k % s1; // res 의 열index
+    
+                parent->get_gradient_element({res_col_idx, res_row_idx}) += grad_output[k];
+            }
         }
     }
 };
@@ -492,7 +498,7 @@ class ExponentialFunction : public Function {
         auto input = saved_tensors[0];
         if (input->requires_grad){
             for(int i=0; i<saved_attrs[0]; i++) {
-                input->grad[i] += exp(input->data[i]);
+                input->grad[i] += exp(input->data[i]) * grad_output[i];
             }
         }
 
@@ -525,16 +531,20 @@ class LeakyReLUFunction : public Function {
                 res->data[i] = slope * input->data[i];
             }
         }
+
+        return res;
     }
 
     void backward(shared_ptr<double[]> grad_output) override {
         auto input = saved_tensors[0];
 
-        for(int i=0; i<input->total_size; i++) {
-            if(input->data[i] >= 0) {
-                input->grad[i] += grad_output[i];
-            } else {
-                input->grad[i] += slope * grad_output[i];
+        if(input->requires_grad) {
+            for(int i=0; i<input->total_size; i++) {
+                if(input->data[i] >= 0) {
+                    input->grad[i] += grad_output[i];
+                } else {
+                    input->grad[i] += slope * grad_output[i];
+                }
             }
         }
     }
@@ -637,6 +647,20 @@ shared_ptr<Tensor> sigmoid(shared_ptr<Tensor> input) {
     return reciprocal(C1 + exp(C2 * input));
 }
 
+// shared_ptr<Tensor> softmax(shared_ptr<Tensor> input) {
+//     shared_ptr<Tensor> res = make_shared<Tensor>(input->shape, input->requires_grad);
+//     int size = (res->shape).size();
+
+//     int sum_shape = vector<int>{};
+//     for(int i=0; i<size-1; i++) {
+//         sum_shape.push_back(shape[i]);
+//     }
+
+//     shared_ptr<Tensor> sum_ = make_shared<Tensor>(sum_shape, input->requires_grad);
+
+    
+// }
+
 class Layer {
     protected:
     bool requires_grad = true;
@@ -713,33 +737,44 @@ class Optimization {
 int main() {
     // auto broadcasting_index = get_broadcasting_index(vector<int>{2, 3, 1, 2}, vector<int> {6, 2, 2, 1}, vector<int>{1, 4, 2}, vector<int>{8, 2, 1});
 
-    shared_ptr<Tensor> a = make_shared<Tensor>(vector<int>{3, 3, 2});
-    for(int i=0; i<18; i++) {
+    shared_ptr<Tensor> a = make_shared<Tensor>(vector<int>{3, 2});
+    for(int i=0; i<6; i++) {
         a->data[i] = i+1;
     }
     shared_ptr<Tensor> b = make_shared<Tensor>(vector<int>{2, 4});
     for(int i=0; i<8; i++) {
         b->data[i] = i-4;
     }
-    
-    shared_ptr<Tensor> c = matmul(a, b);
-    cout << "C: ";
-    for(int i=0; i<36; i++) {
+
+    shared_ptr<Tensor> c = matmul(sigmoid((a)), leaky_relu(-0.2, b));
+
+    for(int i=0; i<8; i++) {
         cout << c->data[i] << " ";
     }
+    cout << endl << endl;
+    
+    // shared_ptr<Tensor> c = matmul(a, b);
+    // cout << "C: ";
+    // for(int i=0; i<36; i++) {
+    //     cout << c->data[i] << " ";
+    // }
+
+    // shared_ptr<Tensor> d = reciprocal(c);
     
     cout << endl;
     cout << "A use count: " << a.use_count() << endl;
     cout << "B use count: " << b.use_count() << endl;
-    cout << "C use count: " << c.use_count();
+    cout << "C use count: " << c.use_count() << endl;
+    // cout << "D use count: " << d.use_count();
     backward(c);
     cout << endl;
     cout << "after A use count: " << a.use_count() << endl;
     cout << "after B use count: " << b.use_count() << endl;
-    cout << "after C use count: " << c.use_count();
+    cout << "after C use count: " << c.use_count() << endl;
+    // cout << "after D use count: " << d.use_count();
 
     cout << "\nA grad: ";
-    for(int i=0; i<18; i++) {
+    for(int i=0; i<6; i++) {
         cout << a->grad[i] << " ";
     }
 
@@ -747,6 +782,11 @@ int main() {
     for(int i=0; i<8; i++) {
         cout << b->grad[i] << " ";
     }
+
+    // cout << "\nC grad: ";
+    // for(int i=0; i<36; i++) {
+    //     cout << c->grad[i] << " ";
+    // }
 
     cout << endl;
 

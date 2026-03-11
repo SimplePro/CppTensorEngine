@@ -76,3 +76,10 @@ index += a[N-1];
 - 전역 scope에서는 변수의 선언과 초기화만 허용된다.
 - Layer class 를 추가하여, 이 class를 상속받는 여러 Layer Class를 만들어야 함. 이 Layer들은 각각의 parameters 멤버변수를 갖고 있고 나중에 optimization은 이 parameters에 접근해서 update를 하는 것이다.
 - Layer들을 그룹으로 관리할 수 있도록 Sequential class 를 만들어야 한다.
+
+2026/03/02
+- reciprocal 함수를 호출할 때 오류가 발생. saved_tensors vector에 push_back할 때 segmentation fault 에러가 뜸. 이유는 reciprocal 함수에서 auto grad_fn = shared_ptr<ReciprocalFunction>(); 으로 써서 났던 것임. shared_ptr 은 type의 한 형태로 이해하면 된다. 더 정확히는 특정 객체를 가리키는 스마트 포인터인데, shared_ptr<ReciprocalFunction>() 은 ReciprocalFunction 타입 객체를 가리키는 스마트 포인터라는 의미일 뿐, ReciprocalFunction 객체를 생성하지는 않는다. make_shared<ReciprocalFunction>() 을 해야 ReciprocalFunction 객체를 생성하고 그 객체를 가리키는 스마트포인터 객체도 생성해서 반환하는 것이다.
+
+2026/03/11
+- reciprocal, exp, sigmoid, leaky_relu 함수를 검증을 했는데, exp 함수에서 backward 부분에서 grad_output[i]를 곱해주지 않는 오류가 있어 수정하였다.
+- C++에서 가상 메모리 주소와 실제 메모리 주소가 어떤 식으로 다른지 좀 더 찾아보았다. C++에서 변수의 메모리 주소를 출력했을 때 나오는 값은 가상 메모리 주소이다. 실제 메모리 주소와는 다르다. 실제로 OS가 메모리를 관리할 때는 덩어리 단위로 관리를 하는데, 만약 a라는 배열의 크기가 1MB이고, OS가 4KB씩 나누어서 메모리를 관리한다면 실제 메모리 주소에서는 값들이 일렬로 배열되어 있지 않을 확률이 있다. 하지만 C++에서 compile 할 때는 가상 메모리 주소상 일렬로 배열되어 있어서 그냥 메모리 주소 연산이 가능하다. ex) a + 3 은 4번째 값의 가상 메모리 주소로 나오고 그 가상 메모리 주소를 역참조연산자로 접근하면 4번째 값이 나옴. 
