@@ -558,6 +558,98 @@ shared_ptr<Tensor> leaky_relu(double slope, shared_ptr<Tensor> input) {
     return res;
 }
 
+// class ConcatFunction : public Function {
+//     public:
+
+//     int dim;
+    
+//     shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs, int dim) : dim(dim) {
+//         vector<int> res_shape;
+//         bool requires_grad = false;
+
+//         for(int i=0; i<inputs.size(); i++) {
+//             if(inputs[i]->shape[dim] != 1) throw invalid_argument("shape[dim] must be 1!");
+//             requires_grad = requires_grad || inputs[i].requires_grad;
+//         }
+
+//         for(int i=0; i<inputs[0]->shape.size(); i++) {
+//             if(i == dim) {
+//                 res_shape.push_back(inputs.size());
+//             } else {
+//                 res_shape.push_back(inputs[0]->shape[i]);
+//             }
+//         }
+//         auto res = make_shared<Tensor>(res_shape, requires_grad);
+
+//         return;
+//     }
+// };
+
+// Cover only when dim=-1
+class SoftmaxFunction : public Function {
+    public:
+
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+        vector<int> sum_shape = input->shape;
+        sum_shape[sum_shape.size()-1] = 1;
+
+        int last_shape = input->shape[input->shape.size()-1];
+
+        shared_ptr<Tensor> exp_input = exp(input);
+        shared_ptr<Tensor> sum_ = make_shared<Tensor>(sum_shape, false);
+        shared_ptr<Tensor> res = make_shared<Tensor>(input->shape, input->requires_grad);
+
+        for(int i=0; i<sum_->total_size; i++) {
+            for(int j=0; j<last_shape; j++) {
+                sum_->data[i] += exp_input->data[i*last_shape + j];
+            }
+        }
+
+        // shared_ptr<Tensor> res = exp_input * reciprocal(sum_); // it couldn't be used for complexity of chain rule.
+
+        for(int i=0; i<sum_->total_size; i++) {
+            for(int j=0; j<last_shape; j++) {
+                res->data[i*last_shape + j] = exp_input->data[i*last_shape+j]/sum_->data[i];
+            }
+        }
+        
+        save_for_backward(exp_input); // exp_input is parent role;
+        save_for_backward(sum_);
+        // save_for_backward(res);
+        saved_attrs.push_back(last_shape);
+
+        return res;
+    }
+
+    void backward(shared_ptr<double[]> grad_output) override {
+        auto exp_input = saved_tensors[0];
+        if (!exp_input->requires_grad) return;
+
+        auto sum_ = saved_tensors[1];
+        int last_shape = saved_attrs[0];
+
+        for(int i=0; i<saved_tensors[1]->total_size; i++) {
+            for(int j=0; j<last_shape; j++) {
+                exp_input->grad[i*last_shape+j] += (sum_->data[i] - exp_input->data[i*last_shape+j])/pow(sum_->data[i], 2.0) * grad_output[i*last_shape + j];
+                for(int k=0; k<last_shape; k++) {
+                    if(k!=j) {
+                        exp_input->grad[i*last_shape+j] -= exp_input->data[i*last_shape+k]/pow(sum_->data[i], 2.0) * grad_output[i*last_shape+k];
+                    }
+                }
+            }
+        }
+    }
+};
+
+shared_ptr<Tensor> softmax(shared_ptr<Tensor> input) {
+    auto grad_fn = make_shared<SoftmaxFunction>();
+    auto res = grad_fn->forward(input);
+    res->grad_fn = grad_fn;
+
+    return res;
+}
+
+
 shared_ptr<Tensor> create_constant(double value) {
     auto c = make_shared<Tensor>(vector<int>{1}, false);
     c->data[0] = value;
@@ -571,8 +663,8 @@ void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set
     visited.insert(v);
 
     if(v->grad_fn) {
-        if(v->grad_fn->saved_tensors.size() > 0) build_topo(v->grad_fn->saved_tensors[0], topo_list, visited);
-        if(v->grad_fn->saved_tensors.size() > 1) build_topo(v->grad_fn->saved_tensors[1], topo_list, visited);
+        if(v->grad_fn->saved_tensors.size() > 0 && v->grad_fn->saved_tensors[0]->requires_grad) build_topo(v->grad_fn->saved_tensors[0], topo_list, visited);
+        if(v->grad_fn->saved_tensors.size() > 1 && v->grad_fn->saved_tensors[1]->requires_grad) build_topo(v->grad_fn->saved_tensors[1], topo_list, visited);
     }
 
     topo_list.push_back(v);
@@ -580,10 +672,14 @@ void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set
 
 void backward(shared_ptr<Tensor> t) {
     
-    for(int i = 0; i < t->total_size; i++) {
-        t->grad[i] = 1.0;
+    // for(int i = 0; i < t->total_size; i++) {
+    //     t->grad[i] = 1.0;
+    // }
+    for(int i=0; i<12; i++) {
+        if(i%4==0) {t->grad[i] = 1.0;}
+        else {t->grad[i] = 0.0;}
     }
-    
+
     vector<shared_ptr<Tensor>> topo_list;
     set<shared_ptr<Tensor>> visited;
     
@@ -655,9 +751,10 @@ shared_ptr<Tensor> sigmoid(shared_ptr<Tensor> input) {
 //     for(int i=0; i<size-1; i++) {
 //         sum_shape.push_back(shape[i]);
 //     }
+//     sum_shape.push_back(1);
 
 //     shared_ptr<Tensor> sum_ = make_shared<Tensor>(sum_shape, input->requires_grad);
-
+    
     
 // }
 
@@ -748,8 +845,10 @@ int main() {
 
     shared_ptr<Tensor> c = matmul(sigmoid((a)), leaky_relu(-0.2, b));
 
-    for(int i=0; i<8; i++) {
-        cout << c->data[i] << " ";
+    shared_ptr<Tensor> d = softmax(c);
+
+    for(int i=0; i<12; i++) {
+        cout << d->data[i] << " ";
     }
     cout << endl << endl;
     
@@ -765,12 +864,14 @@ int main() {
     cout << "A use count: " << a.use_count() << endl;
     cout << "B use count: " << b.use_count() << endl;
     cout << "C use count: " << c.use_count() << endl;
+    cout << "D use count: " << d.use_count() << endl;
     // cout << "D use count: " << d.use_count();
-    backward(c);
+    backward(d);
     cout << endl;
     cout << "after A use count: " << a.use_count() << endl;
     cout << "after B use count: " << b.use_count() << endl;
     cout << "after C use count: " << c.use_count() << endl;
+    cout << "after D use count: " << d.use_count() << endl;
     // cout << "after D use count: " << d.use_count();
 
     cout << "\nA grad: ";
@@ -783,10 +884,10 @@ int main() {
         cout << b->grad[i] << " ";
     }
 
-    // cout << "\nC grad: ";
-    // for(int i=0; i<36; i++) {
-    //     cout << c->grad[i] << " ";
-    // }
+    cout << "\nC grad: ";
+    for(int i=0; i<12; i++) {
+        cout << c->grad[i] << " ";
+    }
 
     cout << endl;
 
