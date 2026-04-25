@@ -86,3 +86,9 @@ index += a[N-1];
 
 2026/03/17
 - softmax 함수를 구현할 때 처음에는 backward 부분에서 실제 값과 다른 값을 내는 오류가 있었다. 역전파를 할 때, 입력인 Y_i의 grad는 D_i 에서만 온다고 생각한 것이다. 그러나 실제 미분을 할 때는 D_i에 영향을 주는 모든 변수에 D_i의 grad를 전파해야 하므로, Y_i의 grad는 D_i에서만 오는 것이 아니라, summation한 다른 index에서도 전부 오는 것이다. 역전파를 할 때는 입력 입장에서 보는 것보다, 출력 입장에서 grad를 뿌리는걸로 생각하는게 더 정확하다. 사실 행렬, 벡터 미분으로 제대로 표현하면 실수할 일이 없을 것 같긴 하다. softmax function에서는 exp_input을 parent로 둬서 계산을 진행하고, exp부분의 backward는 기존의 autograd를 따라갈 수 있도록 하였다.
+
+2026/04/26
+- DEV_LOG를 너무 오랫동안 안 써서 코드는 수정이 되었는데, 기록이 안 된 부분이 좀 많은 것 같다.
+- Tensor class에서 set_data method를 추가해주었다. std::copy라는 함수를 이용하면 값 여러개를 한번에 넣어줄 수 있다. vector.begin(), vector.end() 는 반복자라고 불리고, .begin()은 0번쨰 index, .end()는 마지막 index+1 번째 주소를 가리킨다. 수학적으로 반개구간이라고 하는 [a, b)의 개념이다. 그리고 this->data.get()을 해주었는데, 그냥 data만 하면 shared_ptr<double[]> 이라서 객체를 가리키게 되어, data.get()을 하여 그 안에 배열을 가리키도록 한다. 만약에 data의 크기가 vector 크기보다 크다면 data의 0번째 index부터 부분복사가 된다. 만약 data의 크기가 vector 크기보다 작다면 buffer overflow가 발생하는 대참사가 일어난다. 이때 copy는 에러를 안 띄워서 반드시 예외처리를 해주어야 한다. vector 말고 array를 copy하고 싶다면, copy(array, array+n, a); 혹은 copy(std::begin(array), std::end(array), a); 처럼 사용하면 된다.
+- make_shared<T[]>(size); 와 같은 문법은 c++20 이후부터 가능하다. 그 이하 버전에서는 shared_ptr<T[]>(new T[size]); 처럼 사용해야 함.
+- CrossEntropyLoss를 추가함.

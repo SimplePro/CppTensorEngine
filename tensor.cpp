@@ -7,6 +7,7 @@
 #include <set>
 #include <algorithm>
 #include <cmath>
+#include <random>
 
 using namespace std;
 
@@ -65,6 +66,7 @@ class Tensor {
 
         // data = new double[total_size];
         data = shared_ptr<double[]>(new double[total_size]);
+        // data = make_shared<double[]>(total_size); // aviailable for c++20
 
         if (requires_grad) {
             grad = shared_ptr<double[]>(new double[total_size]);
@@ -72,7 +74,6 @@ class Tensor {
                 grad[i] = 0.0;
             }
         }
-        // data = make_shared<double[]>(total_size);
     }
 
     // ~Tensor() {
@@ -146,6 +147,14 @@ class Tensor {
         for(int i=shape_.size()-2; i >= 0; i--) {
             strides[i] = strides[i+1] * shape[i+1];
         }
+    }
+
+    void set_data(const vector<double>& values) {
+        if (values.size() != this->total_size) {
+            throw runtime_error("Size mismatch!");
+        }
+
+        copy(values.begin(), values.end(), this->data.get());
     }
 
 };
@@ -672,13 +681,13 @@ void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set
 
 void backward(shared_ptr<Tensor> t) {
     
-    // for(int i = 0; i < t->total_size; i++) {
-    //     t->grad[i] = 1.0;
-    // }
-    for(int i=0; i<12; i++) {
-        if(i%4==0) {t->grad[i] = 1.0;}
-        else {t->grad[i] = 0.0;}
+    for(int i = 0; i < t->total_size; i++) {
+        t->grad[i] = 1.0;
     }
+    // for(int i=0; i<12; i++) {
+    //     if(i%4==0) {t->grad[i] = 1.0;}
+    //     else {t->grad[i] = 0.0;}
+    // }
 
     vector<shared_ptr<Tensor>> topo_list;
     set<shared_ptr<Tensor>> visited;
@@ -738,6 +747,7 @@ shared_ptr<Tensor> operator*(shared_ptr<Tensor> lhs, shared_ptr<Tensor> rhs) {
 
 shared_ptr<Tensor> C1 = create_constant(1);
 shared_ptr<Tensor> C2 = create_constant(-1);
+shared_ptr<Tensor> EPS = create_constant(1e-7);
 
 shared_ptr<Tensor> sigmoid(shared_ptr<Tensor> input) {
     return reciprocal(C1 + exp(C2 * input));
@@ -766,6 +776,11 @@ class Layer {
     vector<shared_ptr<Tensor>> parameters;
     virtual ~Layer() = default;
 };
+
+shared_ptr<Tensor> xavier_initialization(vector<int> shape, bool requires_grad) {
+    shared_ptr<Tensor> weight = make_shared<Tensor>(shape, requires_grad);
+
+}
 
 class FCLayer : public Layer {
     public:
@@ -804,34 +819,123 @@ class LeakyReLULayer : public Layer {
     }
 };
 
+class SoftmaxLayer : public Layer {
+    public:
+
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+        return softmax(input);
+    }
+};
+
 
 class Sequential {
     public:
 
+    vector<shared_ptr<Layer>> layers;
+
+    void add_layer(shared_ptr<Layer> layer) {
+        layers.push_back(layer);
+    }
+
+    void forward() {}
+
 };
 
-class Optimization {
+class SGDOptimization {
     public:
 
     shared_ptr<Sequential> sequential;
     float lr;
 
-    Optimization(shared_ptr<Sequential> seq, float lr=0.001) : lr(lr) {
+    SGDOptimization(shared_ptr<Sequential> seq, float lr=0.001) : lr(lr) {
         sequential = seq;
     }
 
     void step() {
+        for(int i=0; i < sequential->layers.size(); i++) {
+            for(int j=0; j < sequential->layers[i]->parameters.size(); j++) {
+                if (sequential->layers[i]->parameters[j]->requires_grad == false) continue;
 
+                for(int k=0; k < sequential->layers[i]->parameters[j]->total_size; k++) {
+                    sequential->layers[i]->parameters[j]->data[k] -= lr * sequential->layers[i]->parameters[j]->grad[k];
+                }
+            }
+        }
     }
 
     void zero_grad() {
+        for(int i=0; i < sequential -> layers.size(); i++) {
+            for(int j=0; j < sequential->layers[i]->parameters.size(); j++) {
+                if (sequential->layers[i]->parameters[j]->requires_grad == false) continue;
 
+                for(int k=0; k < sequential->layers[i]->parameters[j]->total_size; k++) {
+                    sequential->layers[i]->parameters[j]->grad[k] = 0.0;
+                }
+            }
+        }
     }
 
 };
 
+class MSELoss {
+    public:
+}; 
+
+class CrossEntropyLoss : public Function {
+    public:
+
+
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> inputs, shared_ptr<Tensor> labels) {
+        vector<int> res_shape;
+        int class_n = inputs->shape[inputs->shape.size()-1];
+        saved_attrs.push_back(class_n);
+
+        save_for_backward(inputs);
+        save_for_backward(labels);
+
+        for(int i=0; i<inputs->shape.size()-1; i++) {
+            res_shape.push_back(inputs->shape[i]);
+        }
+
+        auto res = make_shared<Tensor>(res_shape, inputs->requires_grad);
+        saved_attrs.push_back(res->total_size);
+
+        for(int i=0; i<res->total_size; i++) {
+            res->data[i] = 0.0;
+            for(int j=0; j<class_n; j++) {
+                res->data[i] -= labels->data[i*class_n+j] * log(inputs->data[i*class_n+j] + EPS);
+            }
+        }
+
+        return res;
+    }
+
+    void backward(shared_ptr<double []> grad_output) {
+        int class_n = saved_attrs[0];
+        int total_size = saved_attrs[1];
+        
+        auto inputs = saved_tensors[0];
+        auto labels = saved_tensors[1];
+
+        for(int i=0; i<total_size; i++) {
+            for(int j=0; j<class_n; j++) {
+                inputs->grad[i*class_n+j] -= labels->data[i*class_n+j]/inputs->data[i*class_n+j] * grad_output[i];
+            }
+        }
+    }
+};
+
+shared_ptr<Tensor> cross_entropy_loss(shared_ptr<Tensor> inputs, shared_ptr<Tensor> labels) {
+    auto loss_fn = make_shared<CrossEntropyLoss>();
+    auto res = loss_fn->forward(inputs, labels);
+    res->grad_fn = loss_fn;
+
+    return res;
+}
+
 
 int main() {
+
     // auto broadcasting_index = get_broadcasting_index(vector<int>{2, 3, 1, 2}, vector<int> {6, 2, 2, 1}, vector<int>{1, 4, 2}, vector<int>{8, 2, 1});
 
     shared_ptr<Tensor> a = make_shared<Tensor>(vector<int>{3, 2});
@@ -846,10 +950,22 @@ int main() {
     shared_ptr<Tensor> c = matmul(sigmoid((a)), leaky_relu(-0.2, b));
 
     shared_ptr<Tensor> d = softmax(c);
+    
+    shared_ptr<Tensor> labels = make_shared<Tensor>(vector<int>{3, 4});
+    // labels->data = make_shared<double>({0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0});
+    labels->set_data(vector<double>{0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0});
+
+    shared_ptr<Tensor> losses = cross_entropy_loss(d, labels);
 
     for(int i=0; i<12; i++) {
         cout << d->data[i] << " ";
     }
+    cout << endl;
+
+    for(int i=0; i<3; i++) {
+        cout << losses->data[i] << " ";
+    }
+
     cout << endl << endl;
     
     // shared_ptr<Tensor> c = matmul(a, b);
