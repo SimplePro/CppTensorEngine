@@ -620,9 +620,14 @@ class SoftmaxFunction : public Function {
             }
         }
 
-        auto subtracted_input = subtraction(input, max_v);
+        for(int i=0; i<input->total_size; i++) {
+            input->data[i] -= max_v->data[0];
+        }
 
-        shared_ptr<Tensor> exp_input = exp(subtracted_input);
+        // auto subtracted_input = subtraction(input, max_v);
+
+        // shared_ptr<Tensor> exp_input = exp(subtracted_input);
+        shared_ptr<Tensor> exp_input = exp(input);
         shared_ptr<Tensor> sum_ = make_shared<Tensor>(sum_shape, false);
         shared_ptr<Tensor> res = make_shared<Tensor>(input->shape, input->requires_grad);
 
@@ -655,18 +660,41 @@ class SoftmaxFunction : public Function {
         auto sum_ = saved_tensors[1];
         int last_shape = saved_attrs[0];
 
-        for(int i=0; i<saved_tensors[1]->total_size; i++) {
+        for(int i=0; i<sum_->total_size; i++) {
             for(int j=0; j<last_shape; j++) {
                 exp_input->grad[i*last_shape+j] += (sum_->data[i] - exp_input->data[i*last_shape+j])/pow(sum_->data[i], 2.0) * grad_output[i*last_shape + j];
+
                 for(int k=0; k<last_shape; k++) {
                     if(k!=j) {
                         exp_input->grad[i*last_shape+j] -= exp_input->data[i*last_shape+k]/pow(sum_->data[i], 2.0) * grad_output[i*last_shape+k];
                     }
                 }
+                if(isnan(exp_input->grad[i*last_shape+j])) {
+                    for(int k=0; k<last_shape; k++) {
+                        auto a = exp_input->data[i*last_shape+k]/pow(sum_->data[i], 2.0) * grad_output[i*last_shape + k];
+                        if (isnan(a)) {
+                            cout << endl << "exp_input->data[i*last_shape+k] " << exp_input->data[i*last_shape+k] << endl << pow(sum_->data[i], 2.0) << endl << grad_output[i*last_shape + k] << endl;
+                        }
+                    }
+                    cout << endl;
+                }
             }
         }
     }
 };
+
+// class SoftmaxFunction : public Function {
+//     public:
+
+//     shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+//         vector<int> sum_shape = input->shape;
+//         sum_shape[sum_shape.size()-1] = 1;
+
+//         int last_shape = input->shape[input->shape.size()-1];
+
+
+//     }
+// }
 
 shared_ptr<Tensor> softmax(shared_ptr<Tensor> input) {
     auto grad_fn = make_shared<SoftmaxFunction>();
@@ -889,12 +917,31 @@ class SGDOptimization : public Optimization {
     }
 
     void step() {
-        // for(int i=0; i < sequential->layers.size(); i++) {
-        //     for(int j=0; j < sequential->layers[i]->parameters.size(); j++) {
-        //         if (sequential->layers[i]->parameters[j]->requires_grad == false) continue;
 
-        //         for(int k=0; k < sequential->layers[i]->parameters[j]->total_size; k++) {
-        //             sequential->layers[i]->parameters[j]->data[k] -= lr * sequential->layers[i]->parameters[j]->grad[k];
+        // double total_norm = 0.0;
+        // int total_size_p = 0;
+        // for(auto& p : params) {
+        //     for(int i=0; i<p->total_size; i++) {
+        //         if(p->requires_grad) total_norm += p->grad[i] * p->grad[i];
+        //     }
+        //     total_size_p += p->total_size;
+        // }
+
+        // total_norm /= total_size_p;
+        // total_norm = sqrt(total_norm);
+
+        // double clip_threshold = 1.0;
+        // // cout << endl << total_norm << endl; 
+        // if (isnan(total_norm)) {
+        //     cout << endl << "total_norm is -nan!!" << endl;
+        // }
+
+        // if (total_norm >= clip_threshold) {
+        //     // cout << endl << true << endl;
+        //     double scale = clip_threshold / (total_norm + 1e-6);
+        //     for(auto& p : params) {
+        //         for(int i=0; i<p->total_size; i++) {
+        //             if(p->requires_grad) p->grad[i] *= scale;
         //         }
         //     }
         // }
@@ -903,6 +950,7 @@ class SGDOptimization : public Optimization {
             if (params[i]->requires_grad == false) continue;
 
             for(int j=0; j < params[i]->total_size; j++) {
+
                 momentums[i]->data[j] = m * momentums[i]->data[j] + lr * params[i]->grad[j];
                 params[i]->data[j] -= momentums[i]->data[j];
             }
@@ -910,15 +958,6 @@ class SGDOptimization : public Optimization {
     }
 
     void zero_grad() {
-        // for(int i=0; i < sequential -> layers.size(); i++) {
-        //     for(int j=0; j < sequential->layers[i]->parameters.size(); j++) {
-        //         if (sequential->layers[i]->parameters[j]->requires_grad == false) continue;
-
-        //         for(int k=0; k < sequential->layers[i]->parameters[j]->total_size; k++) {
-        //             sequential->layers[i]->parameters[j]->grad[k] = 0.0;
-        //         }
-        //     }
-        // }
 
         for(int i=0; i < params.size(); i++) {
             if(params[i]->requires_grad == false) continue;
@@ -960,7 +999,7 @@ class CrossEntropyLoss : public Function {
         for(int i=0; i<res->total_size; i++) {
             res->data[i] = 0.0;
             for(int j=0; j<class_n; j++) {
-                res->data[i] -= labels->data[i*class_n+j] * log(inputs->data[i*class_n+j] + 1e-7);
+                res->data[i] -= labels->data[i*class_n+j] * log(inputs->data[i*class_n+j] + 1e-5);
             }
         }
 
@@ -976,7 +1015,7 @@ class CrossEntropyLoss : public Function {
 
         for(int i=0; i<total_size; i++) {
             for(int j=0; j<class_n; j++) {
-                inputs->grad[i*class_n+j] -= labels->data[i*class_n+j]/inputs->data[i*class_n+j] * grad_output[i];
+                inputs->grad[i*class_n+j] -= labels->data[i*class_n+j]/(inputs->data[i*class_n+j]+1e-7) * grad_output[i];
             }
         }
     }
@@ -1010,7 +1049,7 @@ int main() {
     // act2 - LeakyReLU(0.2)
     // act3 - Softmax()
 
-    auto fc1 = FCLayer(28*28, 10, true, true);
+    auto fc1 = FCLayer(28*28, 28, true, true);
     he_initialization(fc1.parameters[0], 28*28); // weight initialization by he
     fc1.parameters[1]->fill(0.0); // bias initialization to zero
 
@@ -1030,11 +1069,11 @@ int main() {
 
     auto act3 = SoftmaxLayer();
 
-    auto optim = SGDOptimization(0.0002, 0.9);
+    auto optim = SGDOptimization(0.000001, 0.90);
     optim.add_parameters(fc1.parameters[0]);
     optim.add_parameters(fc1.parameters[1]);
-    // optim.add_parameters(fc2.parameters[0]);
-    // optim.add_parameters(fc2.parameters[1]);
+    optim.add_parameters(fc2.parameters[0]);
+    optim.add_parameters(fc2.parameters[1]);
     // optim.add_parameters(fc3.parameters[0]);
     // optim.add_parameters(fc3.parameters[1]);
 
@@ -1091,13 +1130,24 @@ int main() {
             auto loss = cross_entropy_loss(pred, y);
             // loss->print();
             // cout << endl;
-
+            
             optim.zero_grad();
             backward(loss);
+
+            for (auto &p : optim.params) {
+                for (int i=0; i < p->total_size; i++) {
+                    if (isnan(p->grad[i])) {
+                        break;
+                    }
+                }
+            }
+            
             optim.step();
 
+
             train_loss.push_back(loss->data[0]);
-            cout << i << " " << j << " " << loss->data[0] << endl;
+            pred->print();
+            cout << endl << i << " " << j << " " << loss->data[0] << endl;
         }
     }
 

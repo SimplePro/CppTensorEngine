@@ -97,4 +97,6 @@ index += a[N-1];
 - mnist 데이터를 불러오고 학습을 돌리려고 하는데, 테스트 도중 prediction이 0으로만 나오는 것을 확인. -> 가중치를 확인해보니 전부 0임. 초기화쪽에 문제있음. -> sigma쪽에 2/n_in가 있었는데, 정수/정수 는 정수 타입으로 나와서 생긴 오류였다. 2를 2.0으로 수정하여 해결.
 - auto x = make_shared<double>(3.0); x = make_shared<double>(5.0); 이렇게 하면 기존의 3.0은 사라진다고 함.
 - batch_size를 고려하지 않고 코드를 먼저 짰어서, 이미지를 하나씩 학습시키는데 불안정도가 매우 높음. learning_rate를 아주 작게 해야 안튀는거 같음.
-- 층이 두개 이상이 되면 자꾸 튀어서 softmax에서 max값을 빼주는 계산을 추가해줌. 그리고 sgd에서 momentum을 이용할 수 있도록 추가해줌. -> 훨씬 덜 튀게 되었음.
+- 층이 두개 이상이 되면 자꾸 튀어서 softmax에서 max값을 빼주는 계산을 추가해줌. 그리고 sgd에서 momentum을 이용할 수 있도록 추가해줌. -> 조금 덜 튀긴 하지만, 여전히 튐.
+- gradient clipping 을 해줌.  -> 여전히 모델이 튀었음.
+- 로그를 계속 찍어보면서 확인해본 결과 forward쪽에서는 문제가 없는데, backward이후 gradient 중에 nan이 존재하게 되고, 그 이후부터 모델이 바로 튀어버린다. 즉, backward 부분에서 not a number 가 될만한 연산들을 조사해야 한다. 디버깅을 계속하다보니 softmax층의 gradient 계산 중에 nan이 발생하였고, 위층에서 전달받은 grad_output에서 nan이 있었다. 그래서 위에 부분인 CrossEntropyLoss backward에서 값을 나눠줄 때 1e-7을 더하여 전달하니 nan이 뜨지 않게 되었다. 그러나 아주 큰 값으로 수렴해버리는 현상이 발생하였다.
