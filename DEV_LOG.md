@@ -92,3 +92,9 @@ index += a[N-1];
 - Tensor class에서 set_data method를 추가해주었다. std::copy라는 함수를 이용하면 값 여러개를 한번에 넣어줄 수 있다. vector.begin(), vector.end() 는 반복자라고 불리고, .begin()은 0번쨰 index, .end()는 마지막 index+1 번째 주소를 가리킨다. 수학적으로 반개구간이라고 하는 [a, b)의 개념이다. 그리고 this->data.get()을 해주었는데, 그냥 data만 하면 shared_ptr<double[]> 이라서 객체를 가리키게 되어, data.get()을 하여 그 안에 배열을 가리키도록 한다. 만약에 data의 크기가 vector 크기보다 크다면 data의 0번째 index부터 부분복사가 된다. 만약 data의 크기가 vector 크기보다 작다면 buffer overflow가 발생하는 대참사가 일어난다. 이때 copy는 에러를 안 띄워서 반드시 예외처리를 해주어야 한다. vector 말고 array를 copy하고 싶다면, copy(array, array+n, a); 혹은 copy(std::begin(array), std::end(array), a); 처럼 사용하면 된다.
 - make_shared<T[]>(size); 와 같은 문법은 c++20 이후부터 가능하다. 그 이하 버전에서는 shared_ptr<T[]>(new T[size]); 처럼 사용해야 함.
 - CrossEntropyLoss를 추가함.
+
+2026/04/28
+- mnist 데이터를 불러오고 학습을 돌리려고 하는데, 테스트 도중 prediction이 0으로만 나오는 것을 확인. -> 가중치를 확인해보니 전부 0임. 초기화쪽에 문제있음. -> sigma쪽에 2/n_in가 있었는데, 정수/정수 는 정수 타입으로 나와서 생긴 오류였다. 2를 2.0으로 수정하여 해결.
+- auto x = make_shared<double>(3.0); x = make_shared<double>(5.0); 이렇게 하면 기존의 3.0은 사라진다고 함.
+- batch_size를 고려하지 않고 코드를 먼저 짰어서, 이미지를 하나씩 학습시키는데 불안정도가 매우 높음. learning_rate를 아주 작게 해야 안튀는거 같음.
+- 층이 두개 이상이 되면 자꾸 튀어서 softmax에서 max값을 빼주는 계산을 추가해줌. 그리고 sgd에서 momentum을 이용할 수 있도록 추가해줌. -> 훨씬 덜 튀게 되었음.
