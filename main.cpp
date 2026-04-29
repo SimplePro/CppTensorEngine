@@ -842,8 +842,11 @@ class FCLayer : public Layer {
 
     shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
         shared_ptr<Tensor> res = matmul(input, parameters[0]);
-        if (bias) res = res + parameters[1];
-
+        // if (bias) res = res + parameters[1];
+        if (bias) {
+            auto res2 = res + parameters[1];
+            return res2;
+        }
         return res;
     }
 };
@@ -857,6 +860,16 @@ class LeakyReLULayer : public Layer {
 
     shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
         return leaky_relu(slope, input);
+    }
+};
+
+class SigmoidLayer : public Layer {
+    public:
+
+    SigmoidLayer() {}
+
+    shared_ptr<Tensor> forward(shared_ptr<Tensor> input) {
+        return sigmoid(input);
     }
 };
 
@@ -910,48 +923,50 @@ class SGDOptimization : public Optimization {
 
     double lr;
     double m;
+    double l2_lambda;
 
-    SGDOptimization(double lr=0.001, double m=0.9) {
+    SGDOptimization(double lr=0.001, double m=0.9, double l2_lambda=0.001) {
         this->lr = lr;
         this->m = m;
+        this->l2_lambda = l2_lambda;
     }
 
     void step() {
 
-        // double total_norm = 0.0;
-        // int total_size_p = 0;
-        // for(auto& p : params) {
-        //     for(int i=0; i<p->total_size; i++) {
-        //         if(p->requires_grad) total_norm += p->grad[i] * p->grad[i];
-        //     }
-        //     total_size_p += p->total_size;
-        // }
+        double total_norm = 0.0;
+        int total_size_p = 0;
+        for(auto& p : params) {
+            for(int i=0; i<p->total_size; i++) {
+                if(p->requires_grad) total_norm += p->grad[i] * p->grad[i];
+            }
+            total_size_p += p->total_size;
+        }
 
-        // total_norm /= total_size_p;
-        // total_norm = sqrt(total_norm);
+        total_norm /= total_size_p;
+        total_norm = sqrt(total_norm);
 
-        // double clip_threshold = 1.0;
-        // // cout << endl << total_norm << endl; 
-        // if (isnan(total_norm)) {
-        //     cout << endl << "total_norm is -nan!!" << endl;
-        // }
+        double clip_threshold = 1.0;
+        // cout << endl << total_norm << endl; 
+        if (isnan(total_norm)) {
+            cout << endl << "total_norm is -nan!!" << endl;
+        }
 
-        // if (total_norm >= clip_threshold) {
-        //     // cout << endl << true << endl;
-        //     double scale = clip_threshold / (total_norm + 1e-6);
-        //     for(auto& p : params) {
-        //         for(int i=0; i<p->total_size; i++) {
-        //             if(p->requires_grad) p->grad[i] *= scale;
-        //         }
-        //     }
-        // }
+        if (total_norm >= clip_threshold) {
+            // cout << endl << true << endl;
+            double scale = clip_threshold / (total_norm + 1e-6);
+            for(auto& p : params) {
+                for(int i=0; i<p->total_size; i++) {
+                    if(p->requires_grad) p->grad[i] *= scale;
+                }
+            }
+        }
 
         for(int i=0; i<params.size(); i++) {
             if (params[i]->requires_grad == false) continue;
 
             for(int j=0; j < params[i]->total_size; j++) {
 
-                momentums[i]->data[j] = m * momentums[i]->data[j] + lr * params[i]->grad[j];
+                momentums[i]->data[j] = m * momentums[i]->data[j] + lr * (params[i]->grad[j] + l2_lambda * params[i]->data[j]);
                 params[i]->data[j] -= momentums[i]->data[j];
             }
         }
@@ -1032,13 +1047,43 @@ shared_ptr<Tensor> cross_entropy_loss(shared_ptr<Tensor> inputs, shared_ptr<Tens
 #include "mnist/include/mnist/mnist_reader.hpp"
 
 int main() {
-    int batch_size = 1; // restricted
+
+
+
+    // auto x = make_shared<Tensor>(vector<int>{2, 3}, true);
+
+    // x->set_data(vector<double>{1, 2, 3, 4, 5, 6});
+    // // b->set_data(vector<double>{5, 2, 3, 8 ,2, 3, 4, 1});
+
+    // auto fc1 = FCLayer(2*3, 2*2, true, true);
+    // he_initialization(fc1.parameters[0], 2*3);
+    // auto fc2 = FCLayer(2*2, 2, true, true);
+    // he_initialization(fc2.parameters[0], 2*2);
+
+    // auto act = LeakyReLULayer(0.2);
+
+    // auto x2 = fc1.forward(x);
+    // auto x3 = act.forward(x2);
+    // auto x4 = fc2.forward(x3);
+    // auto x5 = act.forward(x4);
+    // auto loss = x5*x5;
+
+    // backward(loss);
+
+    // cout << endl;
+
+    // for(int i=0; i<8; i++) {
+    //     cout << b->grad[i] << " ";
+    // }
+    // cout << endl;
+    int batch_size = 128; // restricted
     int img_size = 28*28;    
-    int epoch = 1000;
+    int epoch = 10;
     int iters = 60000;
     double *train_acc = new double[epoch+5];
     vector<double> train_loss;
-    double *test_acc = new double[epoch+5];
+    // double *test_acc = new double[epoch+5];
+    vector<double> test_acc;
 
     auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t, uint8_t>();
 
@@ -1049,27 +1094,29 @@ int main() {
     // act2 - LeakyReLU(0.2)
     // act3 - Softmax()
 
-    auto fc1 = FCLayer(28*28, 28, true, true);
-    he_initialization(fc1.parameters[0], 28*28); // weight initialization by he
+    auto fc1 = FCLayer(28*28, 10, true, true);
+    // xavier_initialization(fc1.parameters[0], 28*28, 10); // weight initialization by he
+    he_initialization(fc1.parameters[0], 28*28);
     fc1.parameters[1]->fill(0.0); // bias initialization to zero
 
     auto act1 = LeakyReLULayer(0.2);
+    // auto act1 = SigmoidLayer();
 
-    auto fc2 = FCLayer(28, 10, true, true);
-    he_initialization(fc2.parameters[0], 28); // weight initialization by he
+    auto fc2 = FCLayer(10, 10, true, true);
+    he_initialization(fc2.parameters[0], 10); // weight initialization by he
     fc2.parameters[1]->fill(0.0); // bias initialization to zero
 
-    auto act2 = LeakyReLULayer(0.2);
+    // auto act2 = LeakyReLULayer(0.2);
 
-    // auto fc3 = FCLayer(28, 10, true, true);
-    // he_initialization(fc3.parameters[0], 28);
+    // auto fc3 = FCLayer(10, 10, true, true);
+    // he_initialization(fc3.parameters[0], 10);
     // fc3.parameters[1]->fill(0.0);
 
     // auto act3 = LeakyReLULayer(0.2);
 
     auto act3 = SoftmaxLayer();
 
-    auto optim = SGDOptimization(0.000001, 0.90);
+    auto optim = SGDOptimization(0.0005/batch_size, 0.9, 0.001);
     optim.add_parameters(fc1.parameters[0]);
     optim.add_parameters(fc1.parameters[1]);
     optim.add_parameters(fc2.parameters[0]);
@@ -1080,15 +1127,17 @@ int main() {
     random_device rd2;
     mt19937 gen2(rd2());
     uniform_int_distribution<> distr(0, 60000-1);
-
+    
     for(int i=0; i < epoch; i++) {
+        int ans = 0;
+        double train_loss_avg = 0;
         for(int j=0; j < iters; j++) {
+            int rand_idx = distr(gen2);
             auto x = make_shared<Tensor>(vector<int>{img_size}, false);
             auto y = make_shared<Tensor>(vector<int>{10}, false);
+            
             y->fill(0.0);
-
-            int rand_idx = distr(gen2);
-
+            
             auto x_ = dataset.training_images[rand_idx];
             auto y_label = dataset.training_labels[rand_idx];
             
@@ -1106,10 +1155,22 @@ int main() {
             auto x2 = fc1.forward(x);
             auto x3 = act1.forward(x2);
             auto x4 = fc2.forward(x3);
-            auto x5 = act2.forward(x4);
-            // auto x6 = fc3.forward(x5);
+            // auto x5 = act2.forward(x4);
+            // auto x6 = fc3.forward(x4);
             // auto x7 = act3.forward(x6);
-            auto pred = act3.forward(x5);
+            auto pred = act3.forward(x4);
+
+            double pred_max = 0;
+            int pred_idx = -1;
+
+            for(int m=0; m<10; m++) {
+                if(pred->data[m] > pred_max) {
+                    pred_max = pred->data[m];
+                    pred_idx = m;
+                }
+            }
+
+            ans += y_label == pred_idx;
 
             // fc1.parameters[0]->print();
             // x2->print();
@@ -1131,7 +1192,7 @@ int main() {
             // loss->print();
             // cout << endl;
             
-            optim.zero_grad();
+            // optim.zero_grad();
             backward(loss);
 
             for (auto &p : optim.params) {
@@ -1142,14 +1203,57 @@ int main() {
                 }
             }
             
-            optim.step();
+            // optim.step();
 
+            if (j%batch_size == 0) {
+                optim.step();
+                optim.zero_grad();
+                cout << endl << i << " " << j << " train_loss: " << train_loss_avg/batch_size << " train acc: " << ans/(double)batch_size << endl;
+                ans = 0;
+                train_loss_avg = 0;
+            }
 
             train_loss.push_back(loss->data[0]);
-            pred->print();
-            cout << endl << i << " " << j << " " << loss->data[0] << endl;
+            train_loss_avg += loss->data[0];
+            // pred->print();
+
+            if((j+1)%10000 == 0) {
+                int ans = 0;
+                for(int k=0; k<6000; k++) {
+                    auto x = make_shared<Tensor>(vector<int>{img_size}, false);
+                    
+                    auto x_ = dataset.test_images[k];
+
+                    for(int m=0; m<img_size; m++) {
+                        x->data[m] = x_[m]/255.0;
+                    }
+
+                    auto x2 = fc1.forward(x);
+                    auto x3 = act1.forward(x2);
+                    auto x4 = fc2.forward(x3);
+                    // auto x5 = act1.forward(x4);
+                    auto pred = act3.forward(x4);
+
+                    double max_prob = 0;
+                    int pred_idx = -1;
+                    for(int m=0; m<10; m++) {
+                        if(pred->data[m]>max_prob) {
+                            max_prob = pred->data[m];
+                            pred_idx = m;
+                        }
+                    }
+
+                    if(pred_idx==dataset.test_labels[k]) {
+                        ans += 1;
+                    }
+                }
+                test_acc.push_back(ans/6000.0);
+                cout << "test_acc: " << test_acc[test_acc.size()-1] << endl;
+            }
         }
     }
+
+    cout << endl ;
 
     return 0;
 }
