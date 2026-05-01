@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <fstream>
 
 using namespace std;
 
@@ -439,6 +440,8 @@ class MatrixMultiplication : public Function {
         auto res = make_shared<Tensor>(res_shape, lhs->requires_grad||rhs_T->requires_grad);
         saved_attrs.push_back(res->total_size);
         res_strides = res->strides;
+
+        res->fill(0.0); // added!! for solving data accumulation problem.
 
         for(int i=0; i<res->total_size; i++) {
             // vector<int> index;
@@ -908,30 +911,12 @@ class Optimization {
     public:
 
     vector<shared_ptr<Tensor>> params;
-    vector<shared_ptr<Tensor>> momentums;
 
     void add_parameters(shared_ptr<Tensor> parameters) {
         this->params.push_back(parameters);
-        auto temp = make_shared<Tensor>(parameters->shape, false);
-        temp->fill(0.0);
-        momentums.push_back(temp);
-    }
-};
-
-class SGDOptimization : public Optimization {
-    public:
-
-    double lr;
-    double m;
-    double l2_lambda;
-
-    SGDOptimization(double lr=0.001, double m=0.9, double l2_lambda=0.001) {
-        this->lr = lr;
-        this->m = m;
-        this->l2_lambda = l2_lambda;
     }
 
-    void step() {
+    void gradient_clipping(double clip_threshold) {
 
         double total_norm = 0.0;
         int total_size_p = 0;
@@ -945,7 +930,6 @@ class SGDOptimization : public Optimization {
         total_norm /= total_size_p;
         total_norm = sqrt(total_norm);
 
-        double clip_threshold = 1.0;
         // cout << endl << total_norm << endl; 
         if (isnan(total_norm)) {
             cout << endl << "total_norm is -nan!!" << endl;
@@ -960,16 +944,6 @@ class SGDOptimization : public Optimization {
                 }
             }
         }
-
-        for(int i=0; i<params.size(); i++) {
-            if (params[i]->requires_grad == false) continue;
-
-            for(int j=0; j < params[i]->total_size; j++) {
-
-                momentums[i]->data[j] = m * momentums[i]->data[j] + lr * (params[i]->grad[j] + l2_lambda * params[i]->data[j]);
-                params[i]->data[j] -= momentums[i]->data[j];
-            }
-        }
     }
 
     void zero_grad() {
@@ -982,6 +956,94 @@ class SGDOptimization : public Optimization {
             }
         }
     }
+
+};
+
+class SGDOptimization : public Optimization {
+    public:
+
+    double lr;
+    double m;
+    double l2_lambda;
+    vector<shared_ptr<Tensor>> momentums;
+
+    SGDOptimization(double lr=0.001, double m=0.9, double l2_lambda=0.001) {
+        this->lr = lr;
+        this->m = m;
+        this->l2_lambda = l2_lambda;
+    }
+
+    void add_parameters(shared_ptr<Tensor> parameters) {
+        this->params.push_back(parameters);
+        auto temp = make_shared<Tensor>(parameters->shape, false);
+        temp->fill(0.0);
+        momentums.push_back(temp);
+    }
+
+    void step() {
+        
+        gradient_clipping(1.0);
+
+        for(int i=0; i<params.size(); i++) {
+            if (params[i]->requires_grad == false) continue;
+
+            for(int j=0; j < params[i]->total_size; j++) {
+
+                momentums[i]->data[j] = m * momentums[i]->data[j] + lr * (params[i]->grad[j] + l2_lambda * params[i]->data[j]);
+                params[i]->data[j] -= momentums[i]->data[j];
+            }
+        }
+    }
+
+};
+
+class AdamOptimization : public Optimization {
+    public:
+
+    double lr;
+    double beta1;
+    double beta2;
+    double EPS;
+    double l2_lambda;
+
+    vector<shared_ptr<Tensor>> momentums1;
+    vector<shared_ptr<Tensor>> momentums2;
+
+    AdamOptimization(double lr, double beta1, double beta2, double EPS, double l2_lambda) {
+        this->lr = lr;
+        this->beta1 = beta1;
+        this->beta2 = beta2;
+        this->EPS = EPS;
+        this->l2_lambda = l2_lambda;
+    }
+
+    void add_parameters(shared_ptr<Tensor> parameters) {
+        this->params.push_back(parameters);
+        auto temp1 = make_shared<Tensor>(parameters->shape, false);
+        temp1->fill(0.0);
+
+        auto temp2 = make_shared<Tensor>(parameters->shape, false);
+        temp2->fill(0.0);
+
+        momentums1.push_back(temp1);
+        momentums2.push_back(temp2);
+    }
+
+    void step() {
+        gradient_clipping(1.0);
+        
+        for(int i=0; i<params.size(); i++) {
+            if (params[i]->requires_grad == false) continue;
+
+            for(int j=0; j<params[i]->total_size; j++) {
+                momentums1[i]->data[j] = beta1 * momentums1[i]->data[j] + (1-beta1) * params[i]->grad[j];
+                momentums2[i]->data[j] = beta2 * momentums2[i]->data[j] + (1-beta2) * params[i]->grad[j]*params[i]->grad[j];
+
+                params[i]->data[j] -= lr * (momentums1[i]->data[j]/(1-beta1)) / (sqrt(momentums2[i]->data[j]/(1-beta2)) + EPS); 
+            }
+        }
+    }
+
 };
 
 class MSELoss {
@@ -1076,13 +1138,17 @@ int main() {
     //     cout << b->grad[i] << " ";
     // }
     // cout << endl;
+
+    string expr_name = "28*28->32->leaky->10->softmax + noise (epoch 150)";
+
     int batch_size = 128; // restricted
-    int img_size = 28*28;    
-    int epoch = 10;
+    int img_size = 28*28;
+    int epoch = 150;
     int iters = 60000;
-    double *train_acc = new double[epoch+5];
+    // double *train_acc = new double[epoch+5];
     vector<double> train_loss;
     // double *test_acc = new double[epoch+5];
+    vector<double> train_acc;
     vector<double> test_acc;
 
     auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t, uint8_t>();
@@ -1094,7 +1160,7 @@ int main() {
     // act2 - LeakyReLU(0.2)
     // act3 - Softmax()
 
-    auto fc1 = FCLayer(28*28, 10, true, true);
+    auto fc1 = FCLayer(28*28, 32, true, true);
     // xavier_initialization(fc1.parameters[0], 28*28, 10); // weight initialization by he
     he_initialization(fc1.parameters[0], 28*28);
     fc1.parameters[1]->fill(0.0); // bias initialization to zero
@@ -1102,8 +1168,8 @@ int main() {
     auto act1 = LeakyReLULayer(0.2);
     // auto act1 = SigmoidLayer();
 
-    auto fc2 = FCLayer(10, 10, true, true);
-    he_initialization(fc2.parameters[0], 10); // weight initialization by he
+    auto fc2 = FCLayer(32, 10, true, true);
+    he_initialization(fc2.parameters[0], 32); // weight initialization by he
     fc2.parameters[1]->fill(0.0); // bias initialization to zero
 
     // auto act2 = LeakyReLULayer(0.2);
@@ -1116,7 +1182,8 @@ int main() {
 
     auto act3 = SoftmaxLayer();
 
-    auto optim = SGDOptimization(0.0005/batch_size, 0.9, 0.001);
+    // auto optim = SGDOptimization(0.0005/batch_size, 0.9, 0.001);
+    auto optim = AdamOptimization(0.001/batch_size, 0.9, 0.999, 1e-8, 0.001);
     optim.add_parameters(fc1.parameters[0]);
     optim.add_parameters(fc1.parameters[1]);
     optim.add_parameters(fc2.parameters[0]);
@@ -1127,6 +1194,10 @@ int main() {
     random_device rd2;
     mt19937 gen2(rd2());
     uniform_int_distribution<> distr(0, 60000-1);
+
+    random_device rd3;
+    mt19937 gen3(rd3());
+    normal_distribution<double> dist1(0, 0.05);
     
     for(int i=0; i < epoch; i++) {
         int ans = 0;
@@ -1142,7 +1213,8 @@ int main() {
             auto y_label = dataset.training_labels[rand_idx];
             
             for(int k=0; k<img_size; k++) {
-                x->data[k] = x_[k]/255.0;
+                x->data[k] = x_[k]/255.0 + dist1(gen3);
+                // x->data[k] = x_[k]/255.0;
             }
 
             y->data[y_label] = 1.0;
@@ -1205,10 +1277,11 @@ int main() {
             
             // optim.step();
 
-            if (j%batch_size == 0) {
+            if ((j+1)%batch_size == 0) {
                 optim.step();
                 optim.zero_grad();
                 cout << endl << i << " " << j << " train_loss: " << train_loss_avg/batch_size << " train acc: " << ans/(double)batch_size << endl;
+                train_acc.push_back(ans/(double)batch_size);
                 ans = 0;
                 train_loss_avg = 0;
             }
@@ -1252,6 +1325,24 @@ int main() {
             }
         }
     }
+
+    ofstream file(string("log/") + expr_name + string("_train_loss.csv"));
+    for(size_t i = 0; i < train_loss.size(); ++i) {
+        file << train_loss[i] << (i == train_loss.size() - 1 ? "" : "\n");
+    }
+    file.close();
+
+    ofstream file2(string("log/") + expr_name + string("_train_acc.csv"));
+    for(size_t i = 0; i < train_acc.size(); ++i) {
+        file2 << train_acc[i] << (i == train_acc.size() - 1 ? "" : "\n");
+    }
+    file2.close();
+
+    ofstream file3(string("log/") + expr_name + string("_test_acc.csv"));
+    for(size_t i = 0; i< test_acc.size(); ++i) {
+        file3 << test_acc[i] << (i == test_acc.size() -1 ? "" : "\n");
+    }
+    file3.close();
 
     cout << endl ;
 
