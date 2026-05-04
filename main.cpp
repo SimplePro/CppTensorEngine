@@ -9,6 +9,7 @@
 #include <cmath>
 #include <random>
 #include <fstream>
+#include <filesystem>
 
 using namespace std;
 
@@ -956,7 +957,6 @@ class Optimization {
             }
         }
     }
-
 };
 
 class SGDOptimization : public Optimization {
@@ -1106,6 +1106,29 @@ shared_ptr<Tensor> cross_entropy_loss(shared_ptr<Tensor> inputs, shared_ptr<Tens
     return res;
 }
 
+void save_parameters(vector<shared_ptr<Tensor>> params, string file_dir, vector<string> file_names) {
+    filesystem::path dir(file_dir);
+    if (filesystem::create_directories(dir)) {
+        cout << "Created a directory!" << endl;
+
+        if (params.size() != file_names.size()) {
+            throw invalid_argument("params and file_names must be the same size.");
+        }
+        
+        for(int i=0; i < file_names.size(); i++) {
+            ofstream file(file_dir + file_names[i]);
+            for(int j = 0; j < params[i]->total_size; j++) {
+                file << params[i]->data[j] << (j == params[i]->total_size -1 ? "" : "\n");
+            }
+            file.close();
+        }
+    } else {
+        cout << "Failed to create a directory" << endl;
+    }
+
+    
+}
+
 #include "mnist/include/mnist/mnist_reader.hpp"
 
 int main() {
@@ -1139,11 +1162,11 @@ int main() {
     // }
     // cout << endl;
 
-    string expr_name = "28*28->32->leaky->10->softmax + noise (epoch 150)";
+    string expr_name = "28*28->32->leaky->10->softmax + noise (epoch 200)";
 
     int batch_size = 128; // restricted
     int img_size = 28*28;
-    int epoch = 150;
+    int epoch = 200;
     int iters = 60000;
     // double *train_acc = new double[epoch+5];
     vector<double> train_loss;
@@ -1183,7 +1206,7 @@ int main() {
     auto act3 = SoftmaxLayer();
 
     // auto optim = SGDOptimization(0.0005/batch_size, 0.9, 0.001);
-    auto optim = AdamOptimization(0.001/batch_size, 0.9, 0.999, 1e-8, 0.001);
+    auto optim = AdamOptimization(0.002/batch_size, 0.9, 0.999, 1e-8, 0.001);
     optim.add_parameters(fc1.parameters[0]);
     optim.add_parameters(fc1.parameters[1]);
     optim.add_parameters(fc2.parameters[0]);
@@ -1343,6 +1366,8 @@ int main() {
         file3 << test_acc[i] << (i == test_acc.size() -1 ? "" : "\n");
     }
     file3.close();
+
+    save_parameters(optim.params, string("./parameters/") + expr_name + string("/"), vector<string>{"fc1_weight", "fc1_bias", "fc2_weight", "fc2_bias"});;
 
     cout << endl ;
 
