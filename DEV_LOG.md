@@ -116,4 +116,4 @@ index += a[N-1];
 
 2026/05/04
 - parameters 저장 로직을 추가하였다.
-- 128->32->leakyrelu->10->softmax 의 구조로 test_acc에서 약 90.4퍼의 정확도를 달성하였고, train_acc도 대략 91~92퍼의 정확도로 overfitting이 거의 없는 모습을 확인할 수 있었다. trainset에 noise를 더해 학습시켜준 것도 효과가 꽤 있었던 것 같다.
+- 128->32->leakyrelu->10->softmax 의 구조로 test_acc에서 약 91.0퍼의 정확도를 달성하였고, train_acc도 대략 92~93퍼의 정확도로 overfitting이 거의 없는 모습을 확인할 수 있었다. trainset에 noise를 더해 학습시켜준 것도 효과가 꽤 있었던 것 같다.
