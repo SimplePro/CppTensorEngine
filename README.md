@@ -1,10 +1,11 @@
 # 🚀 Pure C++ Tensor Engine
-This project is the tensor engine made of C++. <br>
-It can be used to train some models like linear regression, classifier such as mnist classification.
+A lightweight, high-performance tensor engine built from scratch in C++. <br>
+This project implements core deep learning components-from autograd to advanced optimizer-without any external libraries.
 
 ## 🌟 Key Features
-### 1. Auto Grad
-- Build a Topologiest list
+### 1. Autograd Engine (Automatic Differentiation)
+- ***Topological Sorting***: Implements a DFS-based topological sort to ensure the correct order of operations during backpropagation.
+- ***Memory Management***: Utilizes C++ ```std::shared_ptr``` to manage the lifecycle of temporary tensors and prevent memory leaks in complex computational graphs.
 ```cpp
 void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set<shared_ptr<Tensor>>& visited) {
     if (v == nullptr || visited.count(v) > 0) return;
@@ -19,11 +20,8 @@ void build_topo(shared_ptr<Tensor> v, vector<shared_ptr<Tensor>>& topo_list, set
     topo_list.push_back(v);
 }
 ```
-- Design Function Structure
-- Use Smart Pointer to Keep Temporary Object.
-### 2. BroadCasting
-### 3. Matrix Multiplication
-- Use Transpose to Get a Higher Cache Hit Rate.
+### 2. Optimized Matrix Multiplication
+- ***Cache-Friendly Design***: Employs matrix transposition for the right-hand side (RHS) operand to achieve a higher cache hit rate during dot product operations.
 ```cpp
 class MatrixMultiplication : public Function {
     public:
@@ -66,11 +64,15 @@ class MatrixMultiplication : public Function {
     ...
 };
 ```
+### 3. Core Components
+- ***Broadcasting***: Seamlessly handles operations between tensors of different shapes.
+- ***Modular Layers***: Built-in layers like ```Linear(FC)```, ```LeakyReLU```, and ```Softmax```.
 
-## ✨ Challenges (with MNIST dataset)
-### 1. Model gives only 0.
-- To find the problem factor, i checked weights of model. and I found that weights are all zeros.
-- The key factor of this problem is about type of standard deviation of weights in initialization. when initializing the weights, their s.d. is 2/n_in or 2 / (n_in + n_out). In C++, int / int => int. So I modified this to 2.0 / n_in or 2.0 / (n_in + n_out) and Solved.
+## ✨ Challenges & Debugging. 
+### 1. The "Zero Output" Problem. (Integer Division Bug)
+- **Problem**: The model consistently predicted zero, and all weights were found to be zero after initialization.
+- **Root Cause**: During **He Initialization**, the standard deviation calculation used integer division (```2/n_in```), resulting in a ```sigma``` of 0.
+- **Solution**: Explicitly cast literals to floating-point (```2.0 / n_in```) to ensure precise weight distribution.
 ```cpp
 void he_initialization(shared_ptr<Tensor> params, int n_in) {
     long double mu = 0.0;
@@ -82,10 +84,10 @@ void he_initialization(shared_ptr<Tensor> params, int n_in) {
     }
 }
 ```
-### 2. Gradient Exploding (Very Extremeley)
-- When the number of layers is bigger than 1, always Gradient Exploding Problem emerges, very extremeley.
-- Through a lot of experiments, debugging ,, I finally found the key factor of this problem. when model forwarding, some of outputs of fc1 layer were being accumulated. It was memory leaking!
-- Then i thought accumulating something has to do with +(add) operation. fc1 consists of matmul ... matmul has +operation. And i missed to initialize result variable in MatrixMultiplication. So i added initializing logic And Finally solved!
+### 2. The "Accumulation" Bug: Resolving Extreme Gradient Explosion.
+- **Problem**: Adding hidden layers caused the gradients to explode exponentially (NaN/Inf).
+- **Investigation**: Debugging revealed that outputs from the first layer were being **accumulated** across batches. It appeared as if the memory was "leaking" previous values into current calculations.
+- **Solution**: Identified that the ```forward``` pass of ```MatrixMultiplication``` lacked a **Zero-initialization** step for the result tensor. Adding ```res->fill(0.0)``` ensured a clean slate for every operation, stabilizing the entire network.
 ```cpp
 class MatrixMultiplication : public Function {
     public:
@@ -106,14 +108,15 @@ class MatrixMultiplication : public Function {
 
 };
 ```
-## 🪂 Techniques
-### 1. Batch Accumulation
-### 2. Gradient Clipping
-### 3. Adam Optimization
-### 4. Insert Noise
+## 🪂 Advanced Techniques
+To achieve more stability in a custom engine, the following techniques were implemented:
+- **Batch Accumulation**: Simulates larger batch sizes to improve gradient estimation.
+- **Gradient Clipping**: Prevents gradient explosion by capping the norm of gradients.
+- **Adam Optimization**: Adaptive learning rates for faster and more stable convergence.
+- **Gaussian Noise Injection**: Adds $\sigma=0.05$ noise to training data to improve generalization and prevent overfitting.
 
-## 🎈 Result of MNIST
-### Model Structure
+## 🎈 MNIST Benchmark Results
+### Model Architecture
 ```
 ----------------------------------------------------------------
         Layer (type)               Output Shape         Param #
@@ -125,5 +128,11 @@ class MatrixMultiplication : public Function {
 ================================================================
 Total params: 25,450
 ```
-### Train Accuracy: 92.14%, Test Accuracy: 91.01%
-![alt text](<figures/28*28-\>32-\>leaky-\>10-\>softmax + noise (epoch 200)_graph.png>)
+### Performance
+- **Training Accuracy: 92.14%**
+- **Test Accuracy: 91.01%**
+- **Generalization Gap: 1.13%** (Extremeley stable due to advanced techniques)
+
+<p align="center">
+<img src="figures/28*28->32->leaky->10->softmax + noise (epoch 200)_graph.png" width=90%>
+</p>
