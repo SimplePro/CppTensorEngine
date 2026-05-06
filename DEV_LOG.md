@@ -117,3 +117,7 @@ index += a[N-1];
 2026/05/04
 - parameters 저장 로직을 추가하였다.
 - 128->32->leakyrelu->10->softmax 의 구조로 test_acc에서 약 91.0퍼의 정확도를 달성하였고, train_acc도 대략 92~93퍼의 정확도로 overfitting이 거의 없는 모습을 확인할 수 있었다. trainset에 noise를 더해 학습시켜준 것도 효과가 꽤 있었던 것 같다.
+
+2026/05/07
+- virtual은 해당 메소드를 subclass들이 각자 따로 정의하도록 함을 명시적으로 표현하는 것이다. 만약에 virtual을 써주지 않고, 그냥 subclass에서 backward를 정의한다면, 모든 연산들이 Function 타입으로 묶이고 있고, backward()를 할 때, 각 연산의 backward()를 호출하면 컴파일러는 객체의 실제 정체를 보지 않고, Function::backward()를 실행하려고 할 것이다. (정적 바인딩). 그러나 virtual 이 있다면, 컴파일러는 객체의 실제 정체가 따로 있음을 확인을 하게 된다. (동적 바인딩).
+- Pure virtual 은 virtual ~~ () = 0; 처럼 쓸 수 있다. 이렇게 쓰면 모든 subclass는 해당 메소드를 재정의 해주어야 한다.

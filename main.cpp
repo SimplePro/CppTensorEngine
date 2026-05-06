@@ -15,7 +15,6 @@ using namespace std;
 
 class Tensor;
 
-// Function 클래스 코드 이해 부족.
 class Function {
     public:
 
@@ -24,7 +23,6 @@ class Function {
 
     virtual ~Function() = default;
 
-    // virtual shared_ptr<Tensor> forward(vector<shared_ptr<Tensor>> inputs) = 0;
     virtual void backward(shared_ptr<double[]> grad_output) = 0;
 
     void save_for_backward(shared_ptr<Tensor> t) {
