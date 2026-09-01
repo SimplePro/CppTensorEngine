@@ -121,12 +121,12 @@ To achieve more stability in a custom engine, the following techniques were impl
 ----------------------------------------------------------------
         Layer (type)               Output Shape         Param #
 ================================================================
-             FC1                       [32]              25,120
-         LeakyReLU                     [32]                   0
-             FC2                       [10]                 330
+             FC1                       [128]            100,352
+         LeakyReLU                     [128]                  0
+             FC2                       [10]               1,280
           Softmax                      [10]                   0
 ================================================================
-Total params: 25,450
+Total params: 101,632
 ```
 ### Performance
 - **Training Accuracy: 97.41%**
