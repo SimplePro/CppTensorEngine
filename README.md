@@ -134,5 +134,5 @@ Total params: 25,450
 - **Generalization Gap: 1.13%** (Extremeley stable due to advanced techniques)
 
 <p align="center">
-<img src="figures/28*28->32->leaky->10->softmax + noise (epoch 200)_graph.png" width=90%>
+<img src="figures/28*28->128->leaky->10->softmax + noise (epoch 3)_graph.png" width=90%>
 </p>
