@@ -121,3 +121,14 @@ index += a[N-1];
 2026/05/07
 - virtual은 해당 메소드를 subclass들이 각자 따로 정의하도록 함을 명시적으로 표현하는 것이다. 만약에 virtual을 써주지 않고, 그냥 subclass에서 backward를 정의한다면, 모든 연산들이 Function 타입으로 묶이고 있고, backward()를 할 때, 각 연산의 backward()를 호출하면 컴파일러는 객체의 실제 정체를 보지 않고, Function::backward()를 실행하려고 할 것이다. (정적 바인딩). 그러나 virtual 이 있다면, 컴파일러는 객체의 실제 정체가 따로 있음을 확인을 하게 된다. (동적 바인딩).
 - Pure virtual 은 virtual ~~ () = 0; 처럼 쓸 수 있다. 이렇게 쓰면 모든 subclass는 해당 메소드를 재정의 해주어야 한다.
+
+2026/08/31
+- lr 이 문제였다는 것을 알게 되었음. Adam 은 SGD와 다르게 lr이 batch_size에 비례해서 움직이지 않음. lr을 더 크게 수정해주었더니, 다음과 같은 결과가 나옴.
+- accuracy   
+10000 iters: 88.4%   
+20000 iters: 89.75%   
+30000 iters: 90.3%   
+50000 iters: 90.9%   
+80000 iters: 91.8%   
+
+- 모델 구조도 약간 더 크게 수정해서 학습을 시켜봄.
