@@ -129,9 +129,9 @@ To achieve more stability in a custom engine, the following techniques were impl
 Total params: 25,450
 ```
 ### Performance
-- **Training Accuracy: 92.14%**
-- **Test Accuracy: 91.01%**
-- **Generalization Gap: 1.13%** (Extremeley stable due to advanced techniques)
+- **Training Accuracy: 97.41%**
+- **Test Accuracy: 96.37%**
+- **Generalization Gap: 1.04%** (Extremeley stable due to advanced techniques)
 
 <p align="center">
 <img src="figures/28*28->128->leaky->10->softmax + noise (epoch 3)_graph.png" width=90%>
