@@ -1160,11 +1160,11 @@ int main() {
     // }
     // cout << endl;
 
-    string expr_name = "28*28->32->leaky->10->softmax + noise (epoch 200)";
+    string expr_name = "28*28->128->leaky->10->softmax + noise (epoch 3)";
 
     int batch_size = 128; // restricted
     int img_size = 28*28;
-    int epoch = 200;
+    int epoch = 3;
     int iters = 60000;
     // double *train_acc = new double[epoch+5];
     vector<double> train_loss;
@@ -1181,7 +1181,7 @@ int main() {
     // act2 - LeakyReLU(0.2)
     // act3 - Softmax()
 
-    auto fc1 = FCLayer(28*28, 32, true, true);
+    auto fc1 = FCLayer(28*28, 128, true, true);
     // xavier_initialization(fc1.parameters[0], 28*28, 10); // weight initialization by he
     he_initialization(fc1.parameters[0], 28*28);
     fc1.parameters[1]->fill(0.0); // bias initialization to zero
@@ -1189,8 +1189,8 @@ int main() {
     auto act1 = LeakyReLULayer(0.2);
     // auto act1 = SigmoidLayer();
 
-    auto fc2 = FCLayer(32, 10, true, true);
-    he_initialization(fc2.parameters[0], 32); // weight initialization by he
+    auto fc2 = FCLayer(128, 10, true, true);
+    he_initialization(fc2.parameters[0], 128); // weight initialization by he
     fc2.parameters[1]->fill(0.0); // bias initialization to zero
 
     // auto act2 = LeakyReLULayer(0.2);
@@ -1204,7 +1204,7 @@ int main() {
     auto act3 = SoftmaxLayer();
 
     // auto optim = SGDOptimization(0.0005/batch_size, 0.9, 0.001);
-    auto optim = AdamOptimization(0.002/batch_size, 0.9, 0.999, 1e-8, 0.001);
+    auto optim = AdamOptimization(0.003, 0.9, 0.999, 1e-8, 0.001);
     optim.add_parameters(fc1.parameters[0]);
     optim.add_parameters(fc1.parameters[1]);
     optim.add_parameters(fc2.parameters[0]);
